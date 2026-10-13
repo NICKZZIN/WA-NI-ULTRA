@@ -37,7 +37,7 @@ class AboutActivity : BaseActivity() {
         val binding = ActivityAboutBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.btnTelegram.setOnClickListener { openUrl("https://t.me/waenhancer") }
+        binding.btnTelegram.setOnClickListener { openUrl("https://t.me/NickC137") }
         binding.btnGithub.setOnClickListener { openUrl("https://github.com/Dev4Mod/WaEnhancer") }
 
         val contributorTopMargin = resources.getDimensionPixelSize(R.dimen.spacing_small)
