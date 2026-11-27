@@ -3,20 +3,21 @@
 Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed / Vector / YukiHookAPI 1.5), **100% gratuito**, **100% traduzido em Português** e com **Bot de Figurinhas e Áudio integrado** — sem chaves de API externas, sem pareamento e sem planos pagos.
 
 - **Telegram:** [@NickC137](https://t.me/NickC137)
-- **Versão atual:** `1.7.1`
+- **Versão atual:** `1.7.2`
 
 ---
 
-## Principais Novidades (v1.7.1)
+## Principais Novidades (v1.7.2)
 
 ### 1. Bot de Figurinhas e Áudio 100% Integrado (Sem Parear e 0% Bateria Parado)
-- **Sem QR Code / Sem Pareamento / Envio 100% em Segundo Plano:** roda diretamente dentro do próprio WhatsApp via Xposed. Cria e envia figurinhas estáticas (imagem) e animadas (vídeo/GIF) — além da nota de voz Opus no `!som` — silenciosamente em segundo plano **sem reiniciar o WhatsApp e sem abrir tela de pré-visualização**. Quando parado, não mantém conexões nem threads ativas (**0% de consumo de bateria em segundo plano**).
-- **Comandos no WhatsApp (funcionam na legenda da foto/vídeo, respondendo/marcando a mídia ou mandando logo em seguida):**
-  - `!s` ou `!fig` — transforma foto, GIF ou vídeo (até 10s) em figurinha 512×512 com metadados EXIF personalizados (Pacote e Autor), envia na conversa e salva automaticamente nos **Favoritos**.
-  - `!fig inteiro` — mantém a imagem/vídeo inteira sem cortar (bordas transparentes).
-  - `!som` — cria a figurinha animada do vídeo **+ extrai e envia a nota de voz sincronizada em Ogg/Opus 48 kHz** logo abaixo da figurinha em segundo plano.
-  - `!ajuda` — envia a lista de comandos no chat.
-- **Outras pessoas podem usar no seu Chat Privado (ou Grupos):** no painel do bot você pode ativar/desativar com 1 toque para que amigos enviem `!s`, `!fig`, `!som` e `!ajuda` na conversa privada com você e recebam a figurinha + áudio automaticamente em segundo plano!
+- **Sem QR Code / Sem Pareamento / Envio 100% em Segundo Plano:** roda diretamente dentro do próprio WhatsApp via Xposed. Cria e envia figurinhas estáticas (imagem) e animadas (vídeo/GIF) — além do áudio Ogg/Opus 48 kHz sincronizado no `/figsom` — silenciosamente em segundo plano **sem reiniciar o WhatsApp e sem abrir tela de pré-visualização**. Quando parado, não mantém conexões nem threads ativas (**0% de consumo de bateria em segundo plano**).
+- **Comandos no WhatsApp com prefixo `/` (funcionam na legenda da foto/vídeo, respondendo/marcando a mídia ou mandando logo em seguida):**
+  - **`/fig`** — transforma foto, GIF ou vídeo (padrão 6s, até 10s) em figurinha 512×512 com metadados EXIF personalizados (Pacote e Autor), envia na conversa e salva automaticamente nos **Favoritos**.
+    - Aceita modos (`cortar` padrão, `inteiro`/`ajustar` com bordas transparentes, `esticar`, `redondo`), trecho de vídeo (`/fig 2-7` ou `/fig 5s`), cor e legenda estilo meme (`/fig redondo amarelo bom dia`).
+  - **`/figsom`** — cria figurinha **com áudio** 🔊 (enviando/respondendo a um vídeo com `/figsom` para usar o som do vídeo, ou enviando foto/vídeo com `/figsom` respondendo a um áudio).
+    - Aceita trecho (`/figsom 3-8`), `/figsom parada` (quadro do vídeo vira figurinha parada com até 10s de som) e `/figsom longo` (até 10s animada / 20s parada), injeta `sound-sha256` e `🔊` no EXIF e envia a nota de voz Ogg/Opus 48 kHz sincronizada.
+  - **`/limites`** — informa no chat todos os limites de foto (100 KB), vídeo/GIF (6s padrão, máx 10s, 500 KB, entrada até 16 MB) e áudio (5s animada / 10s parada, Ogg/Opus 48 kHz até 256 KB).
+- **Outras pessoas podem usar no seu Chat Privado (ou Grupos):** no painel do bot você pode ativar/desativar com 1 toque para que amigos enviem `/fig`, `/figsom` e `/limites` na conversa privada com você e recebam a figurinha + áudio automaticamente em segundo plano!
 - **Atalho de 1 toque no WhatsApp (Opcional):** segure o dedo em qualquer foto ou vídeo na conversa e toque em **Figurinha** (pode ser ativado ou desativado no painel do Bot de Figurinhas caso prefira usar apenas comandos).
 - **Painel + Mini Terminal Rolável em Tempo Real:** card direto na tela inicial do app com controle de permissões (Só Eu / Chat Privado / Grupos), opção de ocultar o botão do menu do WhatsApp, atalho `wa.me/+55...`, Criador Rápido e Mini Terminal com rolagem independente e botão Copiar.
 

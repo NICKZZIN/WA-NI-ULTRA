@@ -1,7 +1,7 @@
-[WA-NI-ULTRA 1.7.1]
+[WA-NI-ULTRA 1.7.2]
 
 [NEW]
-* Integrated Sticker & Sound Bot (zero pairing, 0% idle battery): fixed animated video/GIF WebP muxing & saving, optional toggle to hide the context-menu shortcut button in WhatsApp, and synchronized 48 kHz Opus voice-note stickers only when requested (!som)
+* Integrated Sticker & Sound Bot (/fig, /figsom, /limites): uses "/" prefix with 3 dedicated commands — /fig for photo, video or GIF (supports cortar, inteiro, esticar, redondo, time range 2-7, meme captions), /figsom for sound stickers (from video or photo/video quoting audio, with EXIF sound-sha256 + 48 kHz Opus audio), and /limites for video & audio limits; plus optional toggle to hide the context-menu shortcut button in WhatsApp
 * Consistent APK Signing: fixed permanent keystore across all builds so updates install cleanly without uninstalling
 * Automatic Storage Permission & Backup Restore Prompt on Install: requests All Files Access on first launch and automatically checks if a saved configuration backup exists on the device, asking if you want to restore it
 * Collapsible Dropdown Categories Across ALL Tabs: General (Geral, Tela Inicial, Conversa, Figurinhas, Status), Privacy, Media, and Customization now expand inline on the same page (can be toggled in Customization)

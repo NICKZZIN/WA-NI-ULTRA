@@ -3817,6 +3817,21 @@ object Unobfuscator {
     fun loadStickerModelClass(classLoader: ClassLoader): Class<*>? {
         return runCatching {
             UnobfuscatorCache.getInstance().getClass(classLoader) {
+                val stickerLocalClass = findFirstClassUsingStrings(
+                    classLoader,
+                    StringMatchType.Contains,
+                    "StickerGridViewItem.StickerLocal"
+                )
+                val stickerField = stickerLocalClass?.declaredFields?.firstOrNull { field ->
+                    !Modifier.isStatic(field.modifiers) &&
+                        !field.type.isPrimitive &&
+                        field.type != String::class.java &&
+                        field.type != Any::class.java
+                }
+                if (stickerField != null) {
+                    return@getClass stickerField.type
+                }
+
                 val styleClass = loadStickerStyleConstructor(classLoader).declaringClass
                 bridge.findClass {
                     matcher {

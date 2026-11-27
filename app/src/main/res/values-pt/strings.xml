@@ -684,15 +684,15 @@
     <string name="sticker_bot_summary">Crie figurinhas de foto, vídeo animado e com áudio direto no WhatsApp sem parear (0% de bateria parado)</string>
     <string name="sticker_bot_open_btn">Abrir Painel e Mini Terminal do Bot</string>
     <string name="sticker_bot_enabled">Ativar Bot de Figurinhas Integrado</string>
-    <string name="sticker_bot_enabled_sum">Processa !s, !fig, !som e !ajuda direto no WhatsApp sem pareamento e sem gastar bateria em segundo plano</string>
+    <string name="sticker_bot_enabled_sum">Processa /fig, /figsom e /limites direto no WhatsApp sem pareamento e sem gastar bateria em segundo plano</string>
     <string name="sticker_bot_self_only">Modo Só Eu (Apenas meus próprios comandos)</string>
     <string name="sticker_bot_self_only_sum">Quando ativado, o bot responde apenas aos comandos enviados por você mesmo</string>
     <string name="sticker_bot_allow_private">Permitir que outras pessoas usem no meu chat privado</string>
-    <string name="sticker_bot_allow_private_sum">Contatos que enviarem foto/vídeo com !s, !fig, !som ou !ajuda no seu privado recebem a figurinha automaticamente em segundo plano</string>
+    <string name="sticker_bot_allow_private_sum">Contatos que enviarem foto/vídeo com /fig, /figsom ou /limites no seu privado recebem a figurinha automaticamente em segundo plano</string>
     <string name="sticker_bot_allow_groups">Permitir que outras pessoas usem em grupos</string>
-    <string name="sticker_bot_allow_groups_sum">Permite que membros de grupos usem !s, !fig, !som e !ajuda (desative em grupos grandes para evitar spam)</string>
+    <string name="sticker_bot_allow_groups_sum">Permite que membros de grupos usem /fig, /figsom e /limites (desative em grupos grandes para evitar spam)</string>
     <string name="sticker_bot_context_shortcut">Mostrar botão ao segurar na foto/vídeo no WhatsApp</string>
-    <string name="sticker_bot_context_shortcut_sum">Exibe o atalho "Figurinha" no menu ao segurar uma mídia na conversa. Desative para usar apenas comandos (!s, !fig, !som)</string>
+    <string name="sticker_bot_context_shortcut_sum">Exibe o atalho "Figurinha" no menu ao segurar uma mídia na conversa. Desative para usar apenas comandos (/fig, /figsom, /limites)</string>
     <string name="restore_found_backup_title">Backup de Configuração Encontrado</string>
     <string name="restore_found_backup_message">Foi encontrado um backup de configuração padrão salvo no seu aparelho. Deseja restaurar suas configurações agora?</string>
     <string name="restore_now">Restaurar</string>
@@ -709,5 +709,5 @@
     <string name="sticker_bot_terminal_title">Mini Terminal (Logs em Tempo Real)</string>
     <string name="sticker_bot_terminal_clear">Limpar</string>
     <string name="sticker_bot_terminal_copy">Copiar</string>
-    <string name="sticker_bot_commands_hint">Comandos no WhatsApp: envie ou responda uma foto/vídeo com !s ou !fig (ou !fig inteiro), ou !som para figurinha animada + áudio Opus.</string>
+    <string name="sticker_bot_commands_hint">Comandos no WhatsApp: /fig para foto, vídeo ou GIF (aceita inteiro, redondo, esticar, trecho 2-7 e legenda), /figsom para figurinha com áudio e /limites para ver os limites de vídeo e áudio.</string>
 </resources>

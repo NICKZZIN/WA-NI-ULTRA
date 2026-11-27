@@ -134,7 +134,7 @@ class StickerBotActivity : BaseActivity() {
                     putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, false)
                     putBoolean(StickerBotFeature.PREF_BOT_ALLOW_PRIVATE, true)
                 }
-                StickerBotConsole.append("Outras pessoas agora podem usar !s, !fig, !som e !ajuda no seu chat privado!")
+                StickerBotConsole.append("Outras pessoas agora podem usar /fig, /figsom e /limites no seu chat privado!")
             } else {
                 val groupsActive = binding.switchAllowGroups.isChecked
                 binding.switchSelfOnly.isChecked = !groupsActive
@@ -236,7 +236,7 @@ class StickerBotActivity : BaseActivity() {
 
         if (StickerBotConsole.getAll().isEmpty()) {
             StickerBotConsole.append("WA-NI-ULTRA Bot pronto — integrado via Xposed (sem parear, 0% bateria parado).")
-            StickerBotConsole.append("Use !s, !fig ou !som no WhatsApp, ou escolha uma mídia acima.")
+            StickerBotConsole.append("Comandos no WhatsApp: /fig (foto/vídeo/GIF), /figsom (fig com áudio) e /limites.")
         }
         StickerBotConsole.addListener(logListener)
         renderLogs(StickerBotConsole.getAll())
@@ -309,23 +309,35 @@ class StickerBotActivity : BaseActivity() {
                 }.getOrNull()?.takeIf { it.exists() && it.canWrite() } ?: workDir
 
                 val ts = System.currentTimeMillis()
-                val outWebp = File(sharedDir, "figurinha_$ts.webp")
-                outWebp.writeBytes(encoded.webpBytes)
+                var finalWebpBytes = encoded.webpBytes
 
                 if (isVideo && !isGif && withSound) {
-                    StickerBotConsole.append("Convertendo áudio para Ogg/Opus 48kHz (máx 10s)...")
-                    val converted = AudioOpusConverter.convert(tempInput.absolutePath, 10_000_000L, workDir)
+                    StickerBotConsole.append("Convertendo áudio para Ogg/Opus 48kHz (máx 5s animada)...")
+                    val converted = AudioOpusConverter.convert(
+                        tempInput.absolutePath,
+                        WebpStickerEncoder.DEFAULT_SOUND_ANIM_DURATION_MS * 1000L,
+                        workDir
+                    )
                     if (converted != null && converted.exists() && converted.length() > 0) {
                         val sharedOpus = File(sharedDir, "figurinha_som_$ts.opus")
                         converted.copyTo(sharedOpus, overwrite = true)
                         converted.delete()
                         opusOut = sharedOpus
-                        StickerBotConsole.append("Áudio Opus gerado: ${sharedOpus.length() / 1024} KB")
+                        finalWebpBytes = WebpStickerEncoder.tagSoundSticker(
+                            finalWebpBytes,
+                            sharedOpus.readBytes(),
+                            pack,
+                            author
+                        )
+                        StickerBotConsole.append("Áudio Opus gerado: ${sharedOpus.length() / 1024} KB (SHA-256 anexado ao EXIF)")
                     } else {
                         StickerBotConsole.append("Vídeo sem áudio; enviando figurinha animada.")
                         opusOut = null
                     }
                 }
+
+                val outWebp = File(sharedDir, "figurinha_$ts.webp")
+                outWebp.writeBytes(finalWebpBytes)
 
                 val targetPhone = withContext(Dispatchers.Main) {
                     binding.editSelfPhone.text?.toString().orEmpty()

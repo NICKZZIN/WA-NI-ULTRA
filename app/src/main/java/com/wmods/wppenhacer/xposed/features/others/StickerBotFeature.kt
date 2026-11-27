@@ -9,12 +9,14 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.database.MatrixCursor
 import android.database.sqlite.SQLiteDatabase
+import android.graphics.Color
 import android.net.Uri
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.widget.Toast
+import java.text.Normalizer
 import androidx.core.content.ContextCompat
 import com.highcapable.kavaref.KavaRef.Companion.resolve
 import com.highcapable.yukihookapi.extension.kavaref.hook
@@ -57,7 +59,15 @@ import java.util.concurrent.TimeUnit
 class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences) :
     Feature(classLoader, preferences) {
 
-    private enum class BotCmd { STICKER, SOUND_STICKER, HELP }
+    private enum class BotCmd { STICKER, SOUND_STICKER, LIMITS }
+
+    private data class ResolvedMediaPair(
+        val visualFile: File,
+        val visualType: Int,
+        val isGif: Boolean,
+        val isVideo: Boolean,
+        val separateAudioFile: File? = null
+    )
 
     private val completedKeys: MutableSet<String> =
         Collections.synchronizedSet(object : LinkedHashSet<String>() {
@@ -115,6 +125,9 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
 
     @Volatile
     private var liveStickersDb: SQLiteDatabase? = null
+
+    @Volatile
+    private var liveMsgStoreDb: SQLiteDatabase? = null
 
     override fun doHook() {
         resolveInternalSenders()
@@ -261,6 +274,9 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                     liveStickersDb = db
                     return@after
                 }
+                if (path.endsWith("/msgstore.db")) {
+                    liveMsgStoreDb = db
+                }
                 if (!isBotEnabled() || !path.endsWith("/msgstore.db")) return@after
                 val rowId = (result as? Number)?.toLong() ?: return@after
                 if (rowId <= 0L) return@after
@@ -316,9 +332,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
     }
 
     private fun isCommandCandidate(text: String): Boolean {
-        if (text.isEmpty()) return false
-        val first = text[0]
-        return first == '!' || first == '/'
+        return text.isNotEmpty() && text[0] == '/'
     }
 
     private fun inspectInsertedMessage(db: SQLiteDatabase, rowId: Long, values: ContentValues) {
@@ -371,12 +385,11 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
     ) {
         if (completedKeys.contains(keyId)) return
         if (!inProgressKeys.add(keyId)) return
-        val fullFrame = hasFullFrameFlag(rawText)
 
         botWorker.execute {
             try {
                 Thread.sleep(350L)
-                processCommand(db, rowId, chatRowId, keyId, fromMe, messageType, parsed, fullFrame)
+                processCommand(db, rowId, chatRowId, keyId, fromMe, messageType, parsed, rawText)
             } finally {
                 inProgressKeys.remove(keyId)
             }
@@ -399,12 +412,14 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 botWorker.execute {
                     createAndDeliverSticker(
                         mediaFile = file,
+                        separateAudioFile = null,
                         isVideo = isVid,
+                        isGif = fMessage.mediaType == 13 || file.extension.equals("gif", ignoreCase = true),
                         withAudio = false,
-                        fullFrame = false,
+                        options = WebpStickerEncoder.StickerOptions(),
                         chatRawJid = chatJid,
                         chatRowId = -1L,
-                        db = null,
+                        db = liveMsgStoreDb,
                         fromMe = true,
                         fMessage = fMessage
                     )
@@ -456,18 +471,21 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             }
             val targetJid = activeJid ?: fallbackSelfJid
             val opusFile = opusPath?.let(::File)?.takeIf { it.exists() && it.length() > 0 }
+            val isAnimated = isAnimatedWebpBytes(webpBytes)
 
             if (!targetJid.isNullOrBlank()) {
                 deliverMediaToChat(
-                    stickerFile = favFile ?: webpFile,
+                    stickerFile = webpFile,
                     webpBytes = webpBytes,
                     plainHash = plainHash,
+                    isAnimated = isAnimated,
                     opusFile = opusFile,
                     chatRawJid = targetJid,
                     chatRowId = -1L,
-                    db = null
+                    db = liveMsgStoreDb
                 )
             }
+            saveToWhatsAppStarredStickers(webpBytes)
             Utils.showToast("Figurinha salva nos Favoritos e enviada!", Toast.LENGTH_SHORT)
         } catch (t: Throwable) {
             logDebug(t)
@@ -483,7 +501,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         fromMe: Boolean,
         messageType: Int,
         cmd: BotCmd,
-        fullFrame: Boolean
+        rawText: String
     ) {
         try {
             val chatJid = resolveChatJid(db, chatRowId)
@@ -493,38 +511,52 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 return
             }
 
-            if (cmd == BotCmd.HELP) {
+            if (cmd == BotCmd.LIMITS) {
                 completedKeys.add(keyId)
-                StickerBotConsole.emitFromXposed(Utils.application, "Comando !ajuda respondido em $chatJid")
-                WppCore.sendMessageToJid(chatJid, HELP_MESSAGE)
+                StickerBotConsole.emitFromXposed(Utils.application, "Comando /limites respondido em $chatJid")
+                WppCore.sendMessageToJid(chatJid, LIMITS_MESSAGE)
                 return
             }
 
-            val mediaPath = resolveMediaFileForCommand(db, rowId, chatRowId, messageType)
-            if (mediaPath == null || !mediaPath.exists()) {
+            val mediaPair = resolveMediaPairForCommand(db, rowId, chatRowId, messageType, cmd == BotCmd.SOUND_STICKER)
+            if (mediaPair == null || !mediaPair.visualFile.exists()) {
                 if (messageType == 0) {
                     completedKeys.add(keyId)
-                    StickerBotConsole.emitFromXposed(
-                        Utils.application,
-                        "Nenhuma foto ou vídeo encontrada na mensagem, resposta ou histórico recente do chat."
-                    )
+                    val msg = if (cmd == BotCmd.SOUND_STICKER) {
+                        "Para */figsom*, envie ou responda a um vídeo, ou envie uma foto/vídeo respondendo a um áudio."
+                    } else {
+                        "Para */fig*, envie uma foto, vídeo ou GIF com */fig* na legenda ou responda a uma mídia com */fig*."
+                    }
+                    StickerBotConsole.emitFromXposed(Utils.application, msg)
                     if (fromMe) {
-                        Utils.showToast("Envie ou marque uma foto/vídeo com o comando!", Toast.LENGTH_SHORT)
+                        Utils.showToast(msg.replace("*", ""), Toast.LENGTH_SHORT)
                     }
                 }
                 return
             }
 
             completedKeys.add(keyId)
-            val isGif = messageType == 13 || mediaPath.extension.equals("gif", ignoreCase = true) ||
-                mediaPath.parentFile?.name?.contains("Gif", ignoreCase = true) == true
-            val isVideo = isVideoFile(mediaPath) || messageType == 3 || isGif
-            val wantAudio = (cmd == BotCmd.SOUND_STICKER) && isVideo && !isGif
+            val parsedOpts = parseStickerOptions(rawText, cmd == BotCmd.SOUND_STICKER, mediaPair.isVideo)
+            val wantAudio = cmd == BotCmd.SOUND_STICKER &&
+                (mediaPair.separateAudioFile != null || (mediaPair.isVideo && !mediaPair.isGif))
+
+            if (cmd == BotCmd.SOUND_STICKER && !wantAudio) {
+                val warnMsg = if (mediaPair.isGif) {
+                    "GIFs do WhatsApp não possuem som 🔇 Enviando figurinha animada sem som."
+                } else {
+                    "Foto não possui som próprio 🔇 Responda a um áudio com */figsom* para combinar foto + áudio. Enviando figurinha normal."
+                }
+                StickerBotConsole.emitFromXposed(Utils.application, warnMsg)
+                if (fromMe) Utils.showToast(warnMsg, Toast.LENGTH_LONG)
+            }
+
             createAndDeliverSticker(
-                mediaFile = mediaPath,
-                isVideo = isVideo,
+                mediaFile = mediaPair.visualFile,
+                separateAudioFile = mediaPair.separateAudioFile,
+                isVideo = mediaPair.isVideo,
+                isGif = mediaPair.isGif,
                 withAudio = wantAudio,
-                fullFrame = fullFrame,
+                options = parsedOpts,
                 chatRawJid = chatJid,
                 chatRowId = chatRowId,
                 db = db,
@@ -539,9 +571,11 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
 
     private fun createAndDeliverSticker(
         mediaFile: File,
+        separateAudioFile: File?,
         isVideo: Boolean,
+        isGif: Boolean,
         withAudio: Boolean,
-        fullFrame: Boolean,
+        options: WebpStickerEncoder.StickerOptions,
         chatRawJid: String?,
         chatRowId: Long,
         db: SQLiteDatabase?,
@@ -550,37 +584,92 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
     ) {
         val app = Utils.application
         try {
+            if (mediaFile.length() > MAX_INPUT_FILE_BYTES) {
+                val msg = "Arquivo excede o limite de 16 MB (${mediaFile.length() / (1024 * 1024)} MB). Envie um trecho menor."
+                StickerBotConsole.emitFromXposed(app, msg)
+                if (fromMe) Utils.showToast(msg, Toast.LENGTH_LONG)
+                return
+            }
+
             fMessage?.let { WppCore.sendReaction("⏳", it.getObject()) }
+            val modeLabel = when (options.fitMode) {
+                WebpStickerEncoder.FitMode.CROP -> "cortar"
+                WebpStickerEncoder.FitMode.CONTAIN -> "inteiro"
+                WebpStickerEncoder.FitMode.STRETCH -> "esticar"
+                WebpStickerEncoder.FitMode.CIRCLE -> "redondo"
+            }
             StickerBotConsole.emitFromXposed(
                 app,
-                "Criando figurinha (${if (isVideo) "vídeo" else "imagem"}${if (withAudio) " + áudio Opus" else ""}) para ${chatRawJid ?: "chat"}..."
+                "Criando figurinha (${if (isVideo && !options.stillFromVideo) "vídeo/GIF" else "imagem"}, modo=$modeLabel${if (withAudio) " + áudio Opus" else ""}) para ${chatRawJid ?: "chat"}..."
             )
-
-            val pack = getPackName()
-            val author = getAuthorName()
-            val encoded = if (isVideo) {
-                WebpStickerEncoder.createAnimatedSticker(mediaFile, fullFrame, pack, author) { msg ->
-                    StickerBotConsole.emitFromXposed(app, msg)
-                }
-            } else {
-                WebpStickerEncoder.createStaticSticker(mediaFile, fullFrame, pack, author) { msg ->
-                    StickerBotConsole.emitFromXposed(app, msg)
-                }
-            }
 
             val workDir = File(app.cacheDir, "sticker_bot").apply { mkdirs() }
             var opusFile: File? = null
+            var soundSha256Base64: String? = null
+
             if (withAudio) {
-                StickerBotConsole.emitFromXposed(app, "Convertendo áudio para Nota de Voz Opus 48kHz (máx 10s)...")
-                opusFile = AudioOpusConverter.convert(mediaFile.absolutePath, 10_000_000L, workDir)
+                val audioSrc = separateAudioFile ?: mediaFile
+                val isAnimatedSticker = isVideo && !options.stillFromVideo
+                val maxAudioMs = when {
+                    options.longSound && isAnimatedSticker -> WebpStickerEncoder.MAX_SOUND_LONG_ANIM_DURATION_MS
+                    options.longSound && !isAnimatedSticker -> WebpStickerEncoder.MAX_SOUND_LONG_STILL_DURATION_MS
+                    isAnimatedSticker -> WebpStickerEncoder.DEFAULT_SOUND_ANIM_DURATION_MS
+                    else -> WebpStickerEncoder.MAX_SOUND_STILL_DURATION_MS
+                }
+                val targetAudioMs = minOf(options.durationMs.coerceAtLeast(1000L), maxAudioMs)
+                val autoLoudest = separateAudioFile != null && options.startMs <= 0L
+
+                StickerBotConsole.emitFromXposed(
+                    app,
+                    "Extraindo áudio Ogg/Opus 48kHz (${targetAudioMs / 1000f}s${if (autoLoudest) ", buscando trecho mais alto" else ""})..."
+                )
+                opusFile = AudioOpusConverter.convert(
+                    filePath = audioSrc.absolutePath,
+                    maxDurationUs = targetAudioMs * 1000L,
+                    outputDir = workDir,
+                    startUs = options.startMs * 1000L,
+                    autoFindLoudest = autoLoudest
+                )
                 if (opusFile != null && opusFile.exists() && opusFile.length() > 0) {
+                    val oggBytes = opusFile.readBytes()
+                    val sha = MessageDigest.getInstance("SHA-256").digest(oggBytes)
+                    soundSha256Base64 = Base64.encodeToString(sha, Base64.NO_WRAP)
                     StickerBotConsole.emitFromXposed(
                         app,
-                        "Áudio Opus pronto: ${opusFile.length() / 1024} KB"
+                        "Áudio Opus pronto: ${oggBytes.size / 1024} KB (SHA-256 anexado ao EXIF)"
                     )
                 } else {
-                    StickerBotConsole.emitFromXposed(app, "Vídeo sem faixa de áudio; enviando figurinha animada.")
+                    StickerBotConsole.emitFromXposed(app, "Mídia sem faixa de áudio audível; enviando figurinha sem som.")
                     opusFile = null
+                }
+            }
+
+            val pack = getPackName()
+            val author = getAuthorName()
+            val effectiveOpts = options.copy(
+                soundSha256Base64 = soundSha256Base64,
+                startMs = if (separateAudioFile != null) 0L else options.startMs
+            )
+
+            val encoded = if (isVideo) {
+                WebpStickerEncoder.createAnimatedSticker(
+                    videoFile = mediaFile,
+                    fullFrame = effectiveOpts.fitMode == WebpStickerEncoder.FitMode.CONTAIN,
+                    packName = pack,
+                    author = author,
+                    options = effectiveOpts
+                ) { msg ->
+                    StickerBotConsole.emitFromXposed(app, msg)
+                }
+            } else {
+                WebpStickerEncoder.createStaticSticker(
+                    imageFile = mediaFile,
+                    fullFrame = effectiveOpts.fitMode == WebpStickerEncoder.FitMode.CONTAIN,
+                    packName = pack,
+                    author = author,
+                    options = effectiveOpts
+                ) { msg ->
+                    StickerBotConsole.emitFromXposed(app, msg)
                 }
             }
 
@@ -604,15 +693,16 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 StickerBotConsole.emitFromXposed(app, "Figurinha salva nos Favoritos do WhatsApp!")
             }
 
-            // 2. Deliver sticker (+ Opus voice note if !som) silently in the background
+            // 2. Deliver sticker (+ Opus voice note if /figsom) silently in the background
             deliverMediaToChat(
                 stickerFile = tempStickerFile,
                 webpBytes = encoded.webpBytes,
                 plainHash = plainHash,
+                isAnimated = encoded.isAnimated,
                 opusFile = opusFile,
                 chatRawJid = chatRawJid,
                 chatRowId = chatRowId,
-                db = db
+                db = db ?: liveMsgStoreDb
             )
 
             // Re-ensure files/Stickers/<hash>.webp is intact after WhatsApp's media sender finishes
@@ -620,7 +710,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 saveToWhatsAppStarredStickers(encoded.webpBytes)
             }
 
-            fMessage?.let { WppCore.sendReaction(if (withAudio) "🔊" else "✅", it.getObject()) }
+            fMessage?.let { WppCore.sendReaction(if (withAudio && opusFile != null) "🔊" else "✅", it.getObject()) }
             if (fromMe) {
                 Utils.showToast(
                     if (withAudio && opusFile != null) "Figurinha + áudio enviados!"
@@ -726,6 +816,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         stickerFile: File,
         webpBytes: ByteArray,
         plainHash: String,
+        isAnimated: Boolean,
         opusFile: File?,
         chatRawJid: String?,
         chatRowId: Long,
@@ -739,7 +830,13 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             return
         }
 
-        val maxIdBefore = queryMaxMessageId(db, chatRowId)
+        val activeDb = db ?: liveMsgStoreDb
+        val effectiveChatRowId = if (chatRowId > 0L) {
+            chatRowId
+        } else {
+            resolveChatRowIdByJid(activeDb, chatRawJid)
+        }
+        val maxIdBefore = queryMaxMessageId(activeDb, effectiveChatRowId)
 
         // 1. Try sending sticker via WhatsApp's native MediaType sender (mediaType = 20 = STICKER)
         var stickerSent = invokeMediaTypeSender(
@@ -750,9 +847,9 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             isVoiceNote = false
         )
 
-        if (stickerSent && db != null && chatRowId > 0L) {
+        if (stickerSent && activeDb != null && effectiveChatRowId > 0L) {
             Thread.sleep(650L)
-            if (queryMaxMessageId(db, chatRowId) <= maxIdBefore) {
+            if (queryMaxMessageId(activeDb, effectiveChatRowId) <= maxIdBefore) {
                 stickerSent = false
             }
         }
@@ -763,7 +860,8 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 targetJid = targetJid,
                 stickerFile = stickerFile,
                 plainHash = plainHash,
-                fileSize = webpBytes.size
+                fileSize = webpBytes.size,
+                isAnimated = isAnimated
             )
         }
 
@@ -776,7 +874,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             )
         }
 
-        // 3. If !som was used, send the 48kHz Opus Voice Note right after the sticker
+        // 3. If /figsom was used, send the 48kHz Opus Voice Note right after the sticker
         if (opusFile != null && opusFile.exists() && opusFile.length() > 0) {
             Thread.sleep(450L)
             val audioSent = invokeMediaTypeSender(
@@ -909,14 +1007,15 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         targetJid: Any,
         stickerFile: File,
         plainHash: String,
-        fileSize: Int
+        fileSize: Int,
+        isAnimated: Boolean
     ): Boolean {
         val sClass = stickerModelClass ?: return false
         val sMethod = stickerSenderMethod ?: return false
 
         return try {
             val stickerObj = instantiateObject(sClass) ?: return false
-            populateStickerModel(stickerObj, stickerFile, plainHash, fileSize)
+            populateStickerModel(stickerObj, stickerFile, plainHash, fileSize, isAnimated)
 
             val receiver = if (Modifier.isStatic(sMethod.modifiers)) {
                 null
@@ -965,7 +1064,8 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         stickerObj: Any,
         stickerFile: File,
         plainHash: String,
-        fileSize: Int
+        fileSize: Int,
+        isAnimated: Boolean
     ) {
         val clazz = stickerObj.javaClass
         if (stickerFieldMap.isNotEmpty()) {
@@ -984,6 +1084,8 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                             field.setInt(stickerObj, 512)
                         field.type == Int::class.javaPrimitiveType && lower.contains("size") ->
                             field.setInt(stickerObj, fileSize)
+                        field.type == Boolean::class.javaPrimitiveType && lower.contains("anim") ->
+                            field.setBoolean(stickerObj, isAnimated)
                     }
                 }
             }
@@ -1105,6 +1207,18 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         }.getOrDefault(-1L)
     }
 
+    private fun resolveChatRowIdByJid(db: SQLiteDatabase?, rawJid: String): Long {
+        if (db == null || !db.isOpen || rawJid.isBlank()) return -1L
+        return runCatching {
+            db.rawQuery(
+                "SELECT c._id FROM chat c JOIN jid j ON j._id = c.jid_row_id WHERE j.raw_string = ? LIMIT 1",
+                arrayOf(rawJid)
+            ).use { cursor ->
+                if (cursor.moveToFirst()) cursor.getLong(0) else -1L
+            }
+        }.getOrDefault(-1L)
+    }
+
     private fun resolveChatJid(db: SQLiteDatabase, chatRowId: Long): String? {
         if (chatRowId <= 0L || !db.isOpen) return null
         return runCatching {
@@ -1117,28 +1231,36 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         }.getOrNull()
     }
 
+    private fun isAnimatedWebpBytes(webp: ByteArray): Boolean {
+        if (webp.size < 24) return false
+        val fourCc = String(webp, 12, 4, Charsets.US_ASCII)
+        return fourCc == "VP8X" && ((webp[20].toInt() and 0x02) != 0)
+    }
+
     /**
-     * Resolves the image/video file for a command:
-     * 1. Direct caption command on an image/video message (polls up to 14s while WhatsApp transcodes/saves the file)
-     * 2. Reply/marked command quoting an image/video message in `message_quoted`
-     * 3. Follow-up command sent right after an image/video in the same chat within the last 3 minutes
+     * Resolves the visual media (image/video/GIF) and optional separate audio file (for `/figsom`
+     * when combining a photo/video with a quoted or recent voice note/MP3, just like kuebot).
      */
-    private fun resolveMediaFileForCommand(
+    private fun resolveMediaPairForCommand(
         db: SQLiteDatabase,
         messageRowId: Long,
         chatRowId: Long,
-        messageType: Int
-    ): File? {
-        // 1. Direct media attached to this message (caption command like sending an image/video with !s or !som)
-        queryMediaPathByRowId(db, messageRowId)?.let { return it }
-        if (messageType != 0) {
+        messageType: Int,
+        wantSound: Boolean
+    ): ResolvedMediaPair? {
+        // 1. Own message media (caption command on an image or video)
+        var ownFile: File? = queryMediaPathByRowId(db, messageRowId)
+        if (ownFile == null && messageType != 0) {
             for (attempt in 1..35) {
                 Thread.sleep(400L)
-                queryMediaPathByRowId(db, messageRowId)?.let { return it }
+                ownFile = queryMediaPathByRowId(db, messageRowId)
+                if (ownFile != null) break
             }
         }
 
         // 2. Quoted / marked message in message_quoted
+        var quotedFile: File? = null
+        var quotedType = -1
         val quotedKeyId = runCatching {
             db.rawQuery(
                 "SELECT key_id FROM message_quoted WHERE message_row_id = ? LIMIT 1",
@@ -1149,48 +1271,127 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         }.getOrNull()
 
         if (!quotedKeyId.isNullOrBlank()) {
-            val originalRowId = runCatching {
+            var originalRowId = -1L
+            runCatching {
                 db.rawQuery(
-                    "SELECT _id FROM message WHERE key_id = ? ORDER BY _id DESC LIMIT 1",
+                    "SELECT _id, message_type FROM message WHERE key_id = ? ORDER BY _id DESC LIMIT 1",
                     arrayOf(quotedKeyId)
                 ).use { cursor ->
-                    if (cursor.moveToFirst()) cursor.getLong(0) else -1L
+                    if (cursor.moveToFirst()) {
+                        originalRowId = cursor.getLong(0)
+                        quotedType = cursor.getInt(1)
+                    }
                 }
-            }.getOrDefault(-1L)
-
+            }
             if (originalRowId > 0L) {
-                queryMediaPathByRowId(db, originalRowId)?.let { return it }
-                for (attempt in 1..12) {
-                    Thread.sleep(400L)
-                    queryMediaPathByRowId(db, originalRowId)?.let { return it }
+                quotedFile = queryMediaPathByRowId(db, originalRowId)
+                if (quotedFile == null) {
+                    for (attempt in 1..12) {
+                        Thread.sleep(400L)
+                        quotedFile = queryMediaPathByRowId(db, originalRowId)
+                        if (quotedFile != null) break
+                    }
                 }
             }
         }
 
-        // 3. Follow-up command: check most recent image/video/gif in the same chat within the last 3 minutes
-        if (chatRowId > 0L) {
-            val minTimestamp = System.currentTimeMillis() - 180_000L
-            val recentMediaRowId = runCatching {
-                db.rawQuery(
-                    "SELECT _id FROM message WHERE chat_row_id = ? AND _id < ? " +
-                        "AND message_type IN (1, 3, 13) AND timestamp >= ? " +
-                        "ORDER BY _id DESC LIMIT 1",
-                    arrayOf(chatRowId.toString(), messageRowId.toString(), minTimestamp.toString())
-                ).use { cursor ->
-                    if (cursor.moveToFirst()) cursor.getLong(0) else -1L
-                }
-            }.getOrDefault(-1L)
-
-            if (recentMediaRowId > 0L) {
-                queryMediaPathByRowId(db, recentMediaRowId)?.let { return it }
-                for (attempt in 1..10) {
-                    Thread.sleep(400L)
-                    queryMediaPathByRowId(db, recentMediaRowId)?.let { return it }
-                }
+        // Case A: Own message has visual media (photo/video with caption /fig or /figsom)
+        if (ownFile != null && !isAudioOnly(ownFile, messageType)) {
+            val separateAudio = if (wantSound && quotedFile != null && isAudioCapable(quotedFile, quotedType)) {
+                quotedFile
+            } else {
+                null
             }
+            return buildMediaPair(ownFile, messageType, separateAudio)
+        }
+
+        // Case B: Quoted message is visual media (replying to a photo/video/GIF with /fig or /figsom)
+        if (quotedFile != null && !isAudioOnly(quotedFile, quotedType)) {
+            val separateAudio = if (wantSound && ownFile != null && isAudioCapable(ownFile, messageType)) {
+                ownFile
+            } else {
+                null
+            }
+            return buildMediaPair(quotedFile, quotedType, separateAudio)
+        }
+
+        // Case C: Quoted message is an audio/voice note (e.g. replying to an audio with /figsom after sending an image)
+        if (wantSound && quotedFile != null && isAudioOnly(quotedFile, quotedType)) {
+            val recentVisual = findRecentVisualInChat(db, chatRowId, messageRowId)
+            if (recentVisual != null) {
+                return buildMediaPair(recentVisual.first, recentVisual.second, quotedFile)
+            }
+        }
+
+        // Case D: Follow-up command sent right after an image/video/GIF in the same chat (within 3 minutes)
+        val recentVisual = findRecentVisualInChat(db, chatRowId, messageRowId)
+        if (recentVisual != null) {
+            return buildMediaPair(recentVisual.first, recentVisual.second, null)
         }
 
         return null
+    }
+
+    private fun findRecentVisualInChat(
+        db: SQLiteDatabase,
+        chatRowId: Long,
+        beforeRowId: Long
+    ): Pair<File, Int>? {
+        if (chatRowId <= 0L) return null
+        val minTimestamp = System.currentTimeMillis() - 180_000L
+        var recentRowId = -1L
+        var recentType = 0
+        runCatching {
+            db.rawQuery(
+                "SELECT _id, message_type FROM message WHERE chat_row_id = ? AND _id < ? " +
+                    "AND message_type IN (1, 3, 13) AND timestamp >= ? " +
+                    "ORDER BY _id DESC LIMIT 1",
+                arrayOf(chatRowId.toString(), beforeRowId.toString(), minTimestamp.toString())
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    recentRowId = cursor.getLong(0)
+                    recentType = cursor.getInt(1)
+                }
+            }
+        }
+        if (recentRowId <= 0L) return null
+        var file = queryMediaPathByRowId(db, recentRowId)
+        if (file == null) {
+            for (attempt in 1..10) {
+                Thread.sleep(400L)
+                file = queryMediaPathByRowId(db, recentRowId)
+                if (file != null) break
+            }
+        }
+        return if (file != null) Pair(file, recentType) else null
+    }
+
+    private fun buildMediaPair(
+        visualFile: File,
+        visualType: Int,
+        separateAudioFile: File?
+    ): ResolvedMediaPair {
+        val isGif = visualType == 13 ||
+            visualFile.extension.equals("gif", ignoreCase = true) ||
+            visualFile.parentFile?.name?.contains("Gif", ignoreCase = true) == true
+        val isVideo = isVideoFile(visualFile) || visualType == 3 || isGif
+        return ResolvedMediaPair(
+            visualFile = visualFile,
+            visualType = visualType,
+            isGif = isGif,
+            isVideo = isVideo,
+            separateAudioFile = separateAudioFile
+        )
+    }
+
+    private fun isAudioOnly(file: File, messageType: Int): Boolean {
+        if (messageType == 2) return true
+        val ext = file.extension.lowercase(Locale.ROOT)
+        return ext in setOf("opus", "ogg", "mp3", "m4a", "aac", "wav")
+    }
+
+    private fun isAudioCapable(file: File, messageType: Int): Boolean {
+        return isAudioOnly(file, messageType) || isVideoFile(file) || messageType == 3
     }
 
     private fun queryMediaPathByRowId(db: SQLiteDatabase, rowId: Long): File? {
@@ -1229,21 +1430,126 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         return candidates.firstOrNull { it.exists() && it.isFile && it.length() > 0L }
     }
 
+    /**
+     * Parses commands strictly prefixed with `/` (as requested by the user):
+     * 1) `/fig` — Image, Video, or GIF sticker (without audio)
+     * 2) `/figsom` — Sticker with Audio 🔊
+     * 3) `/limites` — Shows video, image, and audio limits
+     */
     private fun parseCommand(text: String): BotCmd? {
-        val token = text.split(Regex("\\s+"), limit = 2).firstOrNull()
-            ?.lowercase(Locale.ROOT)?.removePrefix("/")?.let { if (it.startsWith("!")) it else "!$it" }
+        val trimmed = text.trim()
+        if (!trimmed.startsWith("/")) return null
+        val firstToken = trimmed.split(Regex("\\s+"), limit = 2).firstOrNull()
+            ?.removePrefix("/")
+            ?.let(::normalizeToken)
             ?: return null
-        return when (token) {
-            "!s", "!f", "!fig", "!figurinha", "!sticker", "!figu" -> BotCmd.STICKER
-            "!som", "!fs", "!figsom" -> BotCmd.SOUND_STICKER
-            "!ajuda", "!help", "!comandos" -> BotCmd.HELP
+        return when (firstToken) {
+            "fig", "figurinha", "s", "sticker" -> BotCmd.STICKER
+            "figsom", "som", "fs", "figaudio" -> BotCmd.SOUND_STICKER
+            "limites", "limite", "ajuda", "menu", "comandos" -> BotCmd.LIMITS
             else -> null
         }
     }
 
-    private fun hasFullFrameFlag(text: String): Boolean {
-        return text.lowercase(Locale.ROOT).split(Regex("\\s+")).drop(1)
-            .any { it == "inteiro" || it == "!inteiro" }
+    /**
+     * Parses kuebot-style options after `/fig` or `/figsom`:
+     * - Mode: `cortar` (default), `inteiro`/`ajustar`, `esticar`, `redondo`
+     * - Time range: `3-8` (from 3s to 8s), `1:05-1:10`, or `5s` (first 5 seconds)
+     * - `/figsom` flags: `parada` (still frame from video with up to 10s sound), `longo` (up to 10s anim / 20s still)
+     * - Caption color: `branco`, `preto`, `vermelho`, `azul`, `verde`, `amarelo`, `rosa`, `roxo`, `laranja`, `ciano`, `dourado`
+     * - Remaining words become the meme caption at the bottom of the sticker.
+     */
+    private fun parseStickerOptions(
+        rawText: String,
+        isSoundCmd: Boolean,
+        isVideo: Boolean
+    ): WebpStickerEncoder.StickerOptions {
+        val tokens = rawText.trim().split(Regex("\\s+")).drop(1).filter { it.isNotEmpty() }
+        var fitMode: WebpStickerEncoder.FitMode? = null
+        var startMs: Long? = null
+        var durationMs: Long? = null
+        var stillFromVideo = false
+        var longSound = false
+        var captionColor: Int? = null
+
+        var i = 0
+        while (i < tokens.size) {
+            val tok = tokens[i]
+            val norm = normalizeToken(tok)
+            val dotTok = tok.replace(',', '.')
+            val rangeMatch = TIME_RANGE_REGEX.matchEntire(dotTok)
+            val durMatch = DURATION_REGEX.matchEntire(dotTok)
+
+            if (fitMode == null && MODE_ALIASES.containsKey(norm)) {
+                fitMode = MODE_ALIASES[norm]
+            } else if (captionColor == null && CAPTION_COLORS.containsKey(norm)) {
+                captionColor = CAPTION_COLORS[norm]
+            } else if (isSoundCmd && norm in STILL_FLAGS && !stillFromVideo) {
+                stillFromVideo = true
+            } else if (isSoundCmd && norm in LONG_FLAGS && !longSound) {
+                longSound = true
+            } else if (rangeMatch != null && startMs == null) {
+                val aSec = parseTimeSeconds(rangeMatch.groupValues[1])
+                val bSec = parseTimeSeconds(rangeMatch.groupValues[2])
+                if (bSec <= aSec) break
+                startMs = (aSec * 1000.0).toLong()
+                durationMs = ((bSec - aSec) * 1000.0).toLong()
+            } else if (durMatch != null && durationMs == null) {
+                val dSec = durMatch.groupValues[1].toDoubleOrNull() ?: break
+                if (dSec <= 0.0) break
+                durationMs = (dSec * 1000.0).toLong()
+            } else {
+                break
+            }
+            i++
+        }
+
+        val caption = tokens.subList(i, tokens.size).joinToString(" ")
+        val animated = isVideo && !stillFromVideo
+        val defaultDur = when {
+            !isSoundCmd -> WebpStickerEncoder.DEFAULT_ANIM_DURATION_MS
+            animated && longSound -> WebpStickerEncoder.MAX_SOUND_LONG_ANIM_DURATION_MS
+            !animated && longSound -> WebpStickerEncoder.MAX_SOUND_LONG_STILL_DURATION_MS
+            animated -> WebpStickerEncoder.DEFAULT_SOUND_ANIM_DURATION_MS
+            else -> WebpStickerEncoder.MAX_SOUND_STILL_DURATION_MS
+        }
+        val maxDur = when {
+            !isSoundCmd -> WebpStickerEncoder.MAX_ANIM_DURATION_MS
+            animated && longSound -> WebpStickerEncoder.MAX_SOUND_LONG_ANIM_DURATION_MS
+            !animated && longSound -> WebpStickerEncoder.MAX_SOUND_LONG_STILL_DURATION_MS
+            animated -> WebpStickerEncoder.DEFAULT_SOUND_ANIM_DURATION_MS
+            else -> WebpStickerEncoder.MAX_SOUND_STILL_DURATION_MS
+        }
+
+        return WebpStickerEncoder.StickerOptions(
+            fitMode = fitMode ?: WebpStickerEncoder.FitMode.CROP,
+            startMs = (startMs ?: 0L).coerceAtLeast(0L),
+            durationMs = minOf(durationMs ?: defaultDur, maxDur),
+            keepDuration = isSoundCmd,
+            stillFromVideo = stillFromVideo,
+            longSound = longSound,
+            caption = caption,
+            captionColor = captionColor ?: Color.WHITE
+        )
+    }
+
+    private fun parseTimeSeconds(raw: String): Double {
+        val clean = raw.removeSuffix("s").removeSuffix("S")
+        return if (clean.contains(':')) {
+            val parts = clean.split(':')
+            val m = parts.getOrNull(0)?.toDoubleOrNull() ?: 0.0
+            val s = parts.getOrNull(1)?.toDoubleOrNull() ?: 0.0
+            m * 60.0 + s
+        } else {
+            clean.toDoubleOrNull() ?: 0.0
+        }
+    }
+
+    private fun normalizeToken(input: String): String {
+        val nfd = Normalizer.normalize(input.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        return nfd.replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+            .replace("-", "")
+            .replace("_", "")
     }
 
     private fun isVideoFile(file: File): Boolean {
@@ -1270,16 +1576,71 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         private const val MEDIA_TYPE_AUDIO = 2
         private const val MEDIA_TYPE_STICKER = 20
         private const val AUDIO_ORIGIN_VOICE_NOTE = 1
+        private const val MAX_INPUT_FILE_BYTES = 16L * 1024L * 1024L
 
-        private val HELP_MESSAGE = """
-            *WA-NI-ULTRA — Bot de Figurinhas* ✨
+        private val TIME_RANGE_REGEX =
+            Regex("^(\\d+(?::\\d{1,2})?(?:\\.\\d+)?)s?-(\\d+(?::\\d{1,2})?(?:\\.\\d+)?)s?$", RegexOption.IGNORE_CASE)
+        private val DURATION_REGEX =
+            Regex("^(\\d+(?:\\.\\d+)?)s$", RegexOption.IGNORE_CASE)
+
+        private val MODE_ALIASES = mapOf(
+            "cortar" to WebpStickerEncoder.FitMode.CROP,
+            "cortado" to WebpStickerEncoder.FitMode.CROP,
+            "quadrado" to WebpStickerEncoder.FitMode.CROP,
+            "crop" to WebpStickerEncoder.FitMode.CROP,
+            "inteiro" to WebpStickerEncoder.FitMode.CONTAIN,
+            "inteira" to WebpStickerEncoder.FitMode.CONTAIN,
+            "ajustar" to WebpStickerEncoder.FitMode.CONTAIN,
+            "original" to WebpStickerEncoder.FitMode.CONTAIN,
+            "bordas" to WebpStickerEncoder.FitMode.CONTAIN,
+            "esticar" to WebpStickerEncoder.FitMode.STRETCH,
+            "esticado" to WebpStickerEncoder.FitMode.STRETCH,
+            "esticada" to WebpStickerEncoder.FitMode.STRETCH,
+            "redondo" to WebpStickerEncoder.FitMode.CIRCLE,
+            "redonda" to WebpStickerEncoder.FitMode.CIRCLE,
+            "circulo" to WebpStickerEncoder.FitMode.CIRCLE,
+            "bola" to WebpStickerEncoder.FitMode.CIRCLE
+        )
+
+        private val STILL_FLAGS = setOf("parada", "parado", "estatica")
+        private val LONG_FLAGS = setOf("longo", "longa", "estendido", "estendida")
+
+        private val CAPTION_COLORS = mapOf(
+            "branco" to Color.parseColor("#FFFFFF"),
+            "preto" to Color.parseColor("#111111"),
+            "vermelho" to Color.parseColor("#FF2D2D"),
+            "azul" to Color.parseColor("#2D8CFF"),
+            "verde" to Color.parseColor("#2EE66B"),
+            "amarelo" to Color.parseColor("#FFE11A"),
+            "rosa" to Color.parseColor("#FF5EC4"),
+            "roxo" to Color.parseColor("#9B5CFF"),
+            "laranja" to Color.parseColor("#FF8C1A"),
+            "ciano" to Color.parseColor("#1AE5FF"),
+            "dourado" to Color.parseColor("#FFC83D")
+        )
+
+        private val LIMITS_MESSAGE = """
+            🤖 *WA-NI-ULTRA — Comandos e Limites*
             
-            • *!s* ou *!fig* — cria figurinha de foto ou vídeo (na legenda, respondendo ou logo após enviar a mídia).
-            • *!fig inteiro* — mantém a imagem/vídeo inteira sem cortar.
-            • *!som* — cria figurinha animada + nota de voz Opus 48kHz sincronizada.
-            • *!ajuda* — mostra esta lista de comandos.
+            🖼️ */fig* — Figurinha de Foto, Vídeo ou GIF (sem som)
+            • Envie na legenda da mídia, respondendo a ela ou logo após enviar.
+            • Modos opcionais: _cortar_ (padrão), _inteiro_ (sem cortar), _esticar_, _redondo_
+            • Trecho opcional: _/fig 2-7_ (do 2s ao 7s) ou _/fig 5s_
+            • Legenda opcional: _/fig redondo amarelo bom dia_
             
-            💡 _Dica: você também pode segurar o dedo em qualquer foto/vídeo e tocar em "Figurinha" / "Fig + Som"!_
+            🔊 */figsom* — Figurinha com Áudio
+            • Envie ou responda a um *vídeo* com */figsom* (usa o som do vídeo).
+            • Ou envie uma *foto/vídeo* com */figsom* respondendo a um *áudio*.
+            • Opções: _/figsom 3-8_, _/figsom parada_ (vídeo vira fig parada com até 10s de som), _/figsom longo_ (até 10s animada).
+            
+            📏 */limites* — Limites de Imagem, Vídeo e Áudio:
+            • *Foto (estática):* 512×512 px · máx. *100 KB*
+            • *Vídeo / GIF (/fig):* duração padrão *6s* (máx. *10s*) · WebP até *500 KB* · arquivo de entrada até *16 MB*
+            • *Áudio na figurinha (/figsom):*
+              - Animada (vídeo): até *5s* de som (ou *10s* com _/figsom longo_)
+              - Parada (foto ou _/figsom parada_): até *10s* de som (ou *20s* com _/figsom parada longo_)
+              - Formato: Ogg/Opus mono 48 kHz (máx. *256 KB*)
+              - _GIFs do WhatsApp não possuem faixa de áudio._
         """.trimIndent()
     }
 }

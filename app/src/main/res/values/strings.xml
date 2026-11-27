@@ -693,15 +693,15 @@
     <string name="sticker_bot_summary">Create image, animated video, and sound stickers directly inside WhatsApp without pairing (0% idle battery)</string>
     <string name="sticker_bot_open_btn">Open Sticker Bot &amp; Console</string>
     <string name="sticker_bot_enabled">Enable Integrated Sticker Bot</string>
-    <string name="sticker_bot_enabled_sum">Processes !s, !fig, !som and !ajuda directly inside WhatsApp with zero pairing and zero background battery drain</string>
+    <string name="sticker_bot_enabled_sum">Processes /fig, /figsom and /limites directly inside WhatsApp with zero pairing and zero background battery drain</string>
     <string name="sticker_bot_self_only">Only my own commands (Self-Only Mode)</string>
     <string name="sticker_bot_self_only_sum">When enabled, the bot responds only to commands sent by you</string>
     <string name="sticker_bot_allow_private">Allow other people to use the bot in private chat with me</string>
-    <string name="sticker_bot_allow_private_sum">Contacts who send or reply to photos/videos with !s, !fig, !som or !ajuda in your private chat receive the sticker automatically in the background</string>
+    <string name="sticker_bot_allow_private_sum">Contacts who send or reply to photos/videos with /fig, /figsom or /limites in your private chat receive the sticker automatically in the background</string>
     <string name="sticker_bot_allow_groups">Allow other people to use the bot in groups</string>
-    <string name="sticker_bot_allow_groups_sum">Allows group members to trigger !s, !fig, !som and !ajuda (keep off in large groups to avoid spam)</string>
+    <string name="sticker_bot_allow_groups_sum">Allows group members to trigger /fig, /figsom and /limites (keep off in large groups to avoid spam)</string>
     <string name="sticker_bot_context_shortcut">Show "Figurinha" button when holding on a photo/video</string>
-    <string name="sticker_bot_context_shortcut_sum">Adds a quick shortcut to WhatsApp\'s message popup menu. Turn off if you prefer using only chat commands (!s, !fig, !som)</string>
+    <string name="sticker_bot_context_shortcut_sum">Adds a quick shortcut to WhatsApp\'s message popup menu. Turn off if you prefer using only chat commands (/fig, /figsom, /limites)</string>
     <string name="restore_found_backup_title">Saved Configuration Found</string>
     <string name="restore_found_backup_message">We found a saved default configuration backup on your device. Do you want to restore your settings now?</string>
     <string name="restore_now">Restore</string>
@@ -718,5 +718,5 @@
     <string name="sticker_bot_terminal_title">Mini Console (Live Bot Logs)</string>
     <string name="sticker_bot_terminal_clear">Clear</string>
     <string name="sticker_bot_terminal_copy">Copy</string>
-    <string name="sticker_bot_commands_hint">WhatsApp commands: send or reply to a photo/video with !s or !fig (or !fig inteiro), or !som for animated sticker + Opus audio.</string>
+    <string name="sticker_bot_commands_hint">WhatsApp commands: /fig for photo, video or GIF (supports inteiro, redondo, esticar, 2-7, captions), /figsom for sticker with audio, and /limites to see video &amp; audio limits.</string>
 </resources>
