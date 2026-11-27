@@ -137,6 +137,11 @@ object FeatureCatalog {
             R.string.enable_tasker_automation_sum, SearchableFeature.Category.GENERAL_HOME,
             general, "general_home", "tasker", "automation", "intent"
         )
+        add(
+            catalog, context, "custom_ab_props", R.string.custom_ab_props,
+            R.string.custom_ab_props_sum, SearchableFeature.Category.GENERAL_HOME,
+            general, "general_home", "ab", "props", "flags", "override", "experimental"
+        )
 
         // Home screen preferences.
         add(
@@ -590,6 +595,21 @@ object FeatureCatalog {
         add(
             catalog,
             context,
+            "hide_locked_chat_notifications",
+            R.string.hide_locked_chat_notifications,
+            R.string.hide_locked_chat_notifications_sum,
+            category,
+            fragment,
+            null,
+            "locked",
+            "chats",
+            "notifications",
+            "hide",
+            "silent"
+        )
+        add(
+            catalog,
+            context,
             "custom_privacy_type",
             R.string.custom_privacy_per_contact,
             R.string.custom_privacy_per_contact_sum,
@@ -706,6 +726,11 @@ object FeatureCatalog {
             category, fragment, null, "view", "once", "unlimited"
         )
         add(
+            catalog, context, "bypass_screenshot_restriction",
+            R.string.bypass_screenshot_restriction, R.string.bypass_screenshot_restriction_sum,
+            category, fragment, null, "screenshot", "screen", "record", "secure", "flag_secure", "bypass"
+        )
+        add(
             catalog, context, "seentick", R.string.show_button_to_send_blue_tick,
             R.string.show_button_to_send_blue_tick_sum, category, fragment, null,
             "blue", "tick", "button", "mark", "read"
@@ -803,6 +828,16 @@ object FeatureCatalog {
             catalog, context, "downloadvideonote", R.string.downloadvideonote,
             R.string.downloadvideonote_sum, category, fragment, null,
             "download", "video", "note"
+        )
+        add(
+            catalog, context, "parallel_downloading", R.string.parallel_downloading,
+            R.string.parallel_downloading_sum, category, fragment, null,
+            "parallel", "download", "fast", "speed", "multithread", "media"
+        )
+        add(
+            catalog, context, "parallel_downloading_connections",
+            R.string.parallel_downloading_connections, R.string.parallel_downloading_connections_sum,
+            category, fragment, null, "parallel", "download", "connections", "threads"
         )
         add(
             catalog, context, "video_limit_size", R.string.increase_video_size_limit, null,

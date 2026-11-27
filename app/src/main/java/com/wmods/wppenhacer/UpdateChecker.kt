@@ -47,7 +47,7 @@ class UpdateChecker(private val mActivity: Activity) : Runnable {
 
                 if (tagName.isBlank()) return
 
-                hash = tagName.split("-")[1].trim()
+                hash = tagName.substringAfterLast("-", "").trim()
                 changelog = release.optString("body", "No changelog available.").trim()
                 publishedAt = release.optString("published_at", "")
             }

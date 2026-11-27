@@ -99,6 +99,13 @@
             app:summary="@string/enable_tasker_automation_sum"
             app:title="@string/enable_tasker_automation" />
 
+        <EditTextPreference
+            app:iconSpaceReserved="false"
+            android:defaultValue=""
+            app:key="custom_ab_props"
+            app:summary="@string/custom_ab_props_sum"
+            app:title="@string/custom_ab_props" />
+
     </PreferenceCategory>
 
 </PreferenceScreen>

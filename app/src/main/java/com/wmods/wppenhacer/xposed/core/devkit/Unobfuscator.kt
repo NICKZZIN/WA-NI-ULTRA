@@ -3970,6 +3970,19 @@ object Unobfuscator {
         }
     }
 
+    @JvmStatic
+    @Throws(Exception::class)
+    fun loadTigonMediaDownloadMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            findFirstMethodUsingStrings(
+                classLoader,
+                StringMatchType.Contains,
+                "TigonMediaDownload/getDownloadResponse failed; url="
+            )
+                ?: throw RuntimeException("TigonMediaDownload method not found")
+        }
+    }
+
     private class BridgeRouter {
 
         private fun <T> execute(callable: DexKitManager.BridgeCallable<T>): T {

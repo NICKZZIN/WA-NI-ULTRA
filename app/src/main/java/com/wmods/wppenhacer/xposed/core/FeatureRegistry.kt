@@ -40,6 +40,7 @@ import com.wmods.wppenhacer.xposed.features.media.DownloadProfile
 import com.wmods.wppenhacer.xposed.features.media.DownloadViewOnce
 import com.wmods.wppenhacer.xposed.features.media.MediaPreview
 import com.wmods.wppenhacer.xposed.features.media.MediaQuality
+import com.wmods.wppenhacer.xposed.features.media.ParallelDownloading
 import com.wmods.wppenhacer.xposed.features.media.StatusDownload
 import com.wmods.wppenhacer.xposed.features.media.UnsupportedAudioTranscode
 import com.wmods.wppenhacer.xposed.features.media.VideoNoteDownloader
@@ -67,7 +68,9 @@ import com.wmods.wppenhacer.xposed.features.privacy.DndMode
 import com.wmods.wppenhacer.xposed.features.privacy.FreezeLastSeen
 import com.wmods.wppenhacer.xposed.features.privacy.HideChat
 import com.wmods.wppenhacer.xposed.features.privacy.HideSeen
+import com.wmods.wppenhacer.xposed.features.privacy.LockedChatNotifications
 import com.wmods.wppenhacer.xposed.features.privacy.LockedChatsEnhancer
+import com.wmods.wppenhacer.xposed.features.privacy.ScreenshotBypass
 import com.wmods.wppenhacer.xposed.features.privacy.TagMessage
 import com.wmods.wppenhacer.xposed.features.privacy.TypingPrivacy
 import com.wmods.wppenhacer.xposed.features.privacy.ViewOnce
@@ -138,6 +141,9 @@ internal object FeatureRegistry {
         GoogleTranslate::class.java,
         ContactVerify::class.java,
         LockedChatsEnhancer::class.java,
+        LockedChatNotifications::class.java,
+        ScreenshotBypass::class.java,
+        ParallelDownloading::class.java,
         CallRecording::class.java,
         BackupRestore::class.java,
         JumpFirstMessage::class.java,

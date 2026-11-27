@@ -578,4 +578,20 @@
     <string name="status_expiration_time">Tempo de expiração do estado</string>
     <string name="status_expiration_time_sum">Mostra no visualizador de estados quanto tempo falta para cada estado expirar</string>
     <string name="status_expires_in">expira em %1$s</string>
+    <string name="message_sent_via_phone">Esta mensagem foi enviada pelo celular</string>
+    <string name="message_sent_via_linked_device">Esta mensagem foi enviada por um dispositivo conectado (PC/Web/Secundário)</string>
+    <string name="bypass_screenshot_restriction">Liberar prints e gravação de tela</string>
+    <string name="bypass_screenshot_restriction_sum">Remove a proteção FLAG_SECURE permitindo tirar print e gravar a tela em visualização única, fotos de perfil e conversas trancadas</string>
+    <string name="hide_locked_chat_notifications">Ocultar notificações de conversas trancadas</string>
+    <string name="hide_locked_chat_notifications_sum">Silencia notificações de mensagens vindas de conversas trancadas de forma independente</string>
+    <string name="parallel_downloading">Download paralelo de mídias</string>
+    <string name="parallel_downloading_sum">Acelera o download de mídias grandes (6 MB+) usando múltiplas conexões simultâneas</string>
+    <string name="parallel_downloading_connections">Conexões do download paralelo</string>
+    <string name="parallel_downloading_connections_sum">Quantidade de conexões simultâneas usadas no download paralelo de mídias</string>
+    <string name="parallel_connections_2">2 conexões</string>
+    <string name="parallel_connections_4">4 conexões (Padrão)</string>
+    <string name="parallel_connections_6">6 conexões</string>
+    <string name="parallel_connections_8">8 conexões</string>
+    <string name="custom_ab_props">AB Props personalizadas</string>
+    <string name="custom_ab_props_sum">Sobrescreve flags internas do WhatsApp (uma por linha, ex: 12345=true ou 67890=2). Linhas com # são ignoradas</string>
 </resources>

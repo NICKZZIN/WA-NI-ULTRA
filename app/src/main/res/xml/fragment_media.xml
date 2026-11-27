@@ -38,6 +38,20 @@
             app:summary="@string/downloadvideonote_sum"
             app:title="@string/downloadvideonote" />
 
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="parallel_downloading"
+            app:summary="@string/parallel_downloading_sum"
+            app:title="@string/parallel_downloading" />
+
+        <ListPreference
+            android:defaultValue="4"
+            android:dependency="parallel_downloading"
+            android:entries="@array/parallel_downloading_connections_entries"
+            android:entryValues="@array/parallel_downloading_connections_values"
+            app:key="parallel_downloading_connections"
+            app:summary="@string/parallel_downloading_connections_sum"
+            app:title="@string/parallel_downloading_connections" />
+
     </PreferenceCategory>
 
     <PreferenceCategory

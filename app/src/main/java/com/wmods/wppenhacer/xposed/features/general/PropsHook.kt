@@ -14,6 +14,8 @@ class PropsHook(classLoader: ClassLoader, preferences: SharedPreferences) :
     Feature(classLoader, preferences) {
 
     override fun doHook() {
+        loadUserOverrides()
+
         val resolver = runCatching { Unobfuscator.loadPropsResolveMethod(classLoader) }
             .onFailure {
                 logDebug("Props resolver not found, using fallback getters")
@@ -28,6 +30,26 @@ class PropsHook(classLoader: ClassLoader, preferences: SharedPreferences) :
 
         hookProps(Unobfuscator.loadPropsBooleanMethod(classLoader))
         hookProps(Unobfuscator.loadPropsIntegerMethod(classLoader))
+    }
+
+    private fun loadUserOverrides() {
+        val raw = xprefs.getString(PREF_CUSTOM_AB_PROPS, "").orEmpty()
+        if (raw.isBlank()) return
+        for (line in raw.lineSequence()) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue
+            val eqIdx = trimmed.indexOf('=')
+            if (eqIdx <= 0) continue
+            val id = trimmed.substring(0, eqIdx).trim().toIntOrNull() ?: continue
+            val valueStr = trimmed.substring(eqIdx + 1).trim()
+            when {
+                valueStr.equals("true", ignoreCase = true) -> userOverrides.booleans[id] = true
+                valueStr.equals("false", ignoreCase = true) -> userOverrides.booleans[id] = false
+                valueStr.toIntOrNull() != null -> userOverrides.integers[id] = valueStr.toInt()
+                valueStr.toFloatOrNull() != null -> userOverrides.floats[id] = valueStr.toFloat()
+                else -> userOverrides.strings[id] = valueStr
+            }
+        }
     }
 
     private fun hookProps(method: Method) {
@@ -49,6 +71,9 @@ class PropsHook(classLoader: ClassLoader, preferences: SharedPreferences) :
             if (debug == null) debug = value
         }
         if (debug != null) return debug
+
+        val userOverride = userOverrides.find(id, original)
+        if (userOverride != null) return userOverride
 
         val feature = features.find(id, original) ?: return null
         // Fix Bug in Settings Data Usage
@@ -88,7 +113,12 @@ class PropsHook(classLoader: ClassLoader, preferences: SharedPreferences) :
     }
 
     companion object {
+        const val PREF_CUSTOM_AB_PROPS = "custom_ab_props"
         private const val ME_TAB_ENABLED_CODE = 4023
+
+        /** User-configured AB prop overrides (highest priority over feature defaults). */
+        @JvmField
+        val userOverrides = PropLayer()
 
         /** Defaults set by the features of this module. */
         @JvmField

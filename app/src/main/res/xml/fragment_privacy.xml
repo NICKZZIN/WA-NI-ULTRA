@@ -34,6 +34,11 @@
             app:summary="@string/lockedchats_enhancer_sum"
             app:title="@string/lockedchats_enhancer" />
 
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="hide_locked_chat_notifications"
+            app:summary="@string/hide_locked_chat_notifications_sum"
+            app:title="@string/hide_locked_chat_notifications" />
+
     </PreferenceCategory>
 
 
@@ -110,6 +115,11 @@
             app:key="viewonce"
             app:summary="@string/viewonce_sum"
             app:title="@string/viewonce" />
+
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="bypass_screenshot_restriction"
+            app:summary="@string/bypass_screenshot_restriction_sum"
+            app:title="@string/bypass_screenshot_restriction" />
 
         <ListPreference
             app:entries="@array/seentick_buttons"

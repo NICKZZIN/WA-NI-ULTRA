@@ -630,5 +630,42 @@ class MessageStore private constructor() {
         }
     }
 
+    fun queryLockedChatJids(): Set<String>? {
+        val db = sqLiteDatabase ?: return null
+        if (!db.isOpen) return null
+        val ids = LinkedHashSet<String>()
+        val sqlLocked =
+            "SELECT j.raw_string FROM chat c JOIN jid j ON j._id = c.jid_row_id WHERE c.chat_lock > 0"
+        val sqlLidToPhone =
+            "SELECT p.raw_string FROM chat c JOIN jid_map m ON m.lid_row_id = c.jid_row_id JOIN jid p ON p._id = m.jid_row_id WHERE c.chat_lock > 0"
+        val sqlPhoneToLid =
+            "SELECT l.raw_string FROM chat c JOIN jid_map m ON m.jid_row_id = c.jid_row_id JOIN jid l ON l._id = m.lid_row_id WHERE c.chat_lock > 0"
+
+        try {
+            db.rawQuery(sqlLocked, null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    cursor.getString(0)?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let(ids::add)
+                }
+            }
+        } catch (e: Exception) {
+            YukiLog.log(e)
+            return null
+        }
+
+        if (ids.isEmpty()) return emptySet()
+
+        for (sql in arrayOf(sqlLidToPhone, sqlPhoneToLid)) {
+            try {
+                db.rawQuery(sql, null).use { cursor ->
+                    while (cursor.moveToNext()) {
+                        cursor.getString(0)?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let(ids::add)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return ids
+    }
+
     data class MessageInfo(val rowId: Long, val sortId: Long, val chatRowId: Long)
 }

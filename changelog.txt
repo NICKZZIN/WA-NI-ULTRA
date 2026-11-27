@@ -1,17 +1,19 @@
-[NEW]
-* Added support for WhatsApp and WhatsApp Business 2.26.46.xx
-* Voice note speed slider: long press the speed badge of a voice note to choose any speed
-* High quality voice notes, recorded at 48 kHz with a higher bitrate
-* Option to choose the noise suppression level of voice notes
-* Option to download video notes
-* The status viewer now shows how long the status has left before it expires
-* WhatsApp's own app themes are turned off while the custom colors are on, and come back when they are turned off
+[WA-NI-ULTRA 1.6.8]
 
-[FIXED]
-* Fixed WhatsApp crashing on launch with separated groups
-* Fixed the props (feature flags) not being applied on newer WhatsApp versions
-* Fixed videos with some AAC audio formats failing to send
-* Fixed "Disable profile photo in status" not loading on newer WhatsApp versions
-* Fixed the open chat not being detected in the tablet layout
-* Fixed the plugin loading notification getting stuck when WhatsApp was closed while loading
-* Fixed the system bars flickering black over the Home wallpaper on some devices
+[NEW - Ported & Enhanced from WaEnhancerX]
+* Enhanced Message Device Source (CaptureDevice): detects whether a message was sent from a primary Phone or a Linked Device (Desktop/Web/Companion) across all incoming stanza arguments with JID fallback and tap-to-explain Toast
+* Bypass Screenshot Restriction: removes FLAG_SECURE so you can take screenshots and record screen on View Once media, profile photos, and locked chats
+* Parallel Media Downloading: accelerates downloads of large WhatsApp media (6 MB+) with configurable concurrent HTTP Range connections (2/4/6/8) and automatic sequential fallback
+* Hide Locked Chat Notifications: independently silences Android notifications from locked chats without hiding them from lists
+* Visual Edit History Diff: edited message history now highlights removed text (red strikethrough) and added text (green bold)
+* Custom AB Props: override any WhatsApp internal AB feature flag directly in General settings
+
+[SYNCED - WaEnhancer 1.6.2 -> 1.6.7]
+* Added support for WhatsApp and WhatsApp Business up to 2.26.46.xx
+* Migrated to YukiHookAPI 1.5 (libxposed API 101), DexKit 2.3.0, binary unobfuscator cache, and ViewHookDispatcher for major startup/runtime speedups
+* Voice note speed slider, high quality voice notes (48 kHz) with configurable noise suppression, unsupported AAC audio transcoding, video note download, and status expiration time
+* Deleted Message Capture & Backup Viewer
+* Native message scheduling & View Once text sending
+* Redesigned per-contact Custom Privacy (LID-based dropdown) and Hide Delivered Receipt for unknown numbers
+* Enhanced Locked Chats (hides locked contacts from calls, contact picker, status updates & playback)
+* Full Meta AI disable flags, CustomThemeV2 improvements, and RootDiagnostics fixes (Magisk DenyList & Hide My App List)
