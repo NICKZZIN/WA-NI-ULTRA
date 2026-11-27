@@ -33,24 +33,6 @@ object FeatureCatalog {
 
     private val xmlSources = listOf(
         XmlSource(
-            R.xml.preference_general_home,
-            SearchableFeature.Category.GENERAL_HOME,
-            SearchableFeature.FragmentType.GENERAL,
-            "general_home"
-        ),
-        XmlSource(
-            R.xml.preference_general_homescreen,
-            SearchableFeature.Category.GENERAL_HOMESCREEN,
-            SearchableFeature.FragmentType.GENERAL,
-            "homescreen"
-        ),
-        XmlSource(
-            R.xml.preference_general_conversation,
-            SearchableFeature.Category.GENERAL_CONVERSATION,
-            SearchableFeature.FragmentType.GENERAL,
-            "conversation"
-        ),
-        XmlSource(
             R.xml.fragment_general,
             SearchableFeature.Category.GENERAL,
             SearchableFeature.FragmentType.GENERAL,

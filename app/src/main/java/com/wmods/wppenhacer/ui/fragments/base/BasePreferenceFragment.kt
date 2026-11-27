@@ -19,7 +19,10 @@ import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceGroup
+import androidx.preference.PreferenceGroupAdapter
 import androidx.preference.PreferenceManager
+import androidx.preference.PreferenceScreen
+import androidx.preference.PreferenceViewHolder
 import androidx.preference.SeekBarPreference
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -29,6 +32,7 @@ import com.wmods.wppenhacer.BuildConfig
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.preference.FloatSeekBarPreference
 import com.wmods.wppenhacer.ui.fragments.CustomizationFragment
+import com.wmods.wppenhacer.ui.fragments.GeneralFragment
 import com.wmods.wppenhacer.ui.fragments.MediaFragment
 import com.wmods.wppenhacer.ui.fragments.PrivacyFragment
 import com.wmods.wppenhacer.xposed.utils.Utils
@@ -46,7 +50,10 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
     private val expandedCategories = LinkedHashSet<Int>()
 
     private val supportsCollapsibleCategories: Boolean
-        get() = this is PrivacyFragment || this is MediaFragment || this is CustomizationFragment
+        get() = this is GeneralFragment.GeneralPreferenceFragment ||
+                this is PrivacyFragment ||
+                this is MediaFragment ||
+                this is CustomizationFragment
 
     private fun isCollapsibleModeActive(): Boolean =
         supportsCollapsibleCategories && prefs.getBoolean("collapsible_categories", true)
@@ -80,6 +87,54 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
         return super.onCreateView(inflater, container, savedInstanceState)!!
     }
 
+    @SuppressLint("RestrictedApi")
+    override fun onCreateAdapter(preferenceScreen: PreferenceScreen): RecyclerView.Adapter<*> {
+        return object : PreferenceGroupAdapter(preferenceScreen) {
+            override fun onBindViewHolder(holder: PreferenceViewHolder, position: Int) {
+                super.onBindViewHolder(holder, position)
+                val item = getItem(position)
+                if (item is PreferenceCategory) {
+                    val collapsible = isCollapsibleModeActive()
+                    holder.itemView.isEnabled = true
+                    holder.itemView.findViewById<View>(android.R.id.title)?.isEnabled = true
+                    holder.itemView.findViewById<View>(android.R.id.summary)?.isEnabled = true
+                    holder.itemView.findViewById<View>(android.R.id.icon)?.isEnabled = true
+                    holder.itemView.isClickable = collapsible
+                    holder.itemView.isFocusable = collapsible
+                    if (collapsible) {
+                        holder.itemView.setOnClickListener {
+                            toggleCategory(item)
+                        }
+                    } else {
+                        holder.itemView.setOnClickListener(null)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun findCategoryIndex(target: PreferenceCategory): Int {
+        val screen = preferenceScreen ?: return -1
+        for (index in 0 until screen.preferenceCount) {
+            if (screen.getPreference(index) === target) return index
+        }
+        return -1
+    }
+
+    private fun toggleCategory(category: PreferenceCategory) {
+        val index = findCategoryIndex(category)
+        if (index < 0) return
+        val nowExpanded = if (expandedCategories.contains(index)) {
+            expandedCategories.remove(index)
+            false
+        } else {
+            expandedCategories.add(index)
+            true
+        }
+        updateCategoryHeaderSummary(category, nowExpanded)
+        setCategoryChildrenVisible(category, nowExpanded)
+    }
+
     private fun applyCollapsibleCategoriesState() {
         val screen = preferenceScreen ?: return
         val collapsible = isCollapsibleModeActive()
@@ -96,15 +151,7 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
                 updateCategoryHeaderSummary(category, expanded)
                 setCategoryChildrenVisible(category, expanded)
                 category.onPreferenceClickListener = Preference.OnPreferenceClickListener {
-                    val nowExpanded = if (expandedCategories.contains(index)) {
-                        expandedCategories.remove(index)
-                        false
-                    } else {
-                        expandedCategories.add(index)
-                        true
-                    }
-                    updateCategoryHeaderSummary(category, nowExpanded)
-                    setCategoryChildrenVisible(category, nowExpanded)
+                    toggleCategory(category)
                     true
                 }
             }
@@ -113,7 +160,7 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
 
     private fun updateCategoryHeaderSummary(category: PreferenceCategory, expanded: Boolean) {
         category.summary = if (expanded) {
-            "▼"
+            "▼  (${category.preferenceCount})"
         } else {
             "▶  (${category.preferenceCount})"
         }

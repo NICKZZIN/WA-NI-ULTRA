@@ -1,5 +1,6 @@
 package com.wmods.wppenhacer.activities
 
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -11,6 +12,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -72,8 +74,12 @@ class StickerBotActivity : BaseActivity() {
 
         binding.switchBotEnabled.isChecked =
             prefs.getBoolean(StickerBotFeature.PREF_BOT_ENABLED, true)
-        binding.switchSelfOnly.isChecked =
-            prefs.getBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, true)
+        val selfOnly = prefs.getBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, false)
+        val allowPrivate = prefs.getBoolean(StickerBotFeature.PREF_BOT_ALLOW_PRIVATE, true)
+        val allowGroups = prefs.getBoolean(StickerBotFeature.PREF_BOT_ALLOW_GROUPS, false)
+        binding.switchSelfOnly.isChecked = selfOnly
+        binding.switchAllowPrivate.isChecked = !selfOnly && allowPrivate
+        binding.switchAllowGroups.isChecked = !selfOnly && allowGroups
         binding.editPackName.setText(
             prefs.getString(StickerBotFeature.PREF_BOT_PACK, "WA-NI-ULTRA")
         )
@@ -81,6 +87,8 @@ class StickerBotActivity : BaseActivity() {
             prefs.getString(StickerBotFeature.PREF_BOT_AUTHOR, "@NickC137")
         )
         binding.editSelfPhone.setText(prefs.getString(PREF_SAVED_SELF_PHONE, "+55"))
+
+        var updatingSwitches = false
 
         binding.switchBotEnabled.setOnCheckedChangeListener { _, checked ->
             prefs.edit { putBoolean(StickerBotFeature.PREF_BOT_ENABLED, checked) }
@@ -92,13 +100,76 @@ class StickerBotActivity : BaseActivity() {
         }
 
         binding.switchSelfOnly.setOnCheckedChangeListener { _, checked ->
-            prefs.edit { putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, checked) }
-            StickerBotConsole.append(
-                if (checked) "Modo Anti-Ban ativo: respondendo apenas suas próprias mensagens."
-                else "Modo aberto ativo: respondendo em qualquer conversa."
-            )
+            if (updatingSwitches) return@setOnCheckedChangeListener
+            updatingSwitches = true
+            if (checked) {
+                binding.switchAllowPrivate.isChecked = false
+                binding.switchAllowGroups.isChecked = false
+                prefs.edit {
+                    putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, true)
+                    putBoolean(StickerBotFeature.PREF_BOT_ALLOW_PRIVATE, false)
+                    putBoolean(StickerBotFeature.PREF_BOT_ALLOW_GROUPS, false)
+                }
+                StickerBotConsole.append("Modo Só Eu ativado: respondendo apenas aos seus próprios comandos.")
+            } else {
+                binding.switchAllowPrivate.isChecked = true
+                prefs.edit {
+                    putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, false)
+                    putBoolean(StickerBotFeature.PREF_BOT_ALLOW_PRIVATE, true)
+                }
+                StickerBotConsole.append("Modo Privado ativado: contatos podem usar comandos no seu chat privado.")
+            }
+            updatingSwitches = false
             notifyPrefsUpdated()
         }
+
+        binding.switchAllowPrivate.setOnCheckedChangeListener { _, checked ->
+            if (updatingSwitches) return@setOnCheckedChangeListener
+            updatingSwitches = true
+            if (checked) {
+                binding.switchSelfOnly.isChecked = false
+                prefs.edit {
+                    putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, false)
+                    putBoolean(StickerBotFeature.PREF_BOT_ALLOW_PRIVATE, true)
+                }
+                StickerBotConsole.append("Outras pessoas agora podem usar !s, !fig, !som e !ajuda no seu chat privado!")
+            } else {
+                val groupsActive = binding.switchAllowGroups.isChecked
+                binding.switchSelfOnly.isChecked = !groupsActive
+                prefs.edit {
+                    putBoolean(StickerBotFeature.PREF_BOT_ALLOW_PRIVATE, false)
+                    putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, !groupsActive)
+                }
+                StickerBotConsole.append("Comandos de outras pessoas no privado desativados.")
+            }
+            updatingSwitches = false
+            notifyPrefsUpdated()
+        }
+
+        binding.switchAllowGroups.setOnCheckedChangeListener { _, checked ->
+            if (updatingSwitches) return@setOnCheckedChangeListener
+            updatingSwitches = true
+            if (checked) {
+                binding.switchSelfOnly.isChecked = false
+                prefs.edit {
+                    putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, false)
+                    putBoolean(StickerBotFeature.PREF_BOT_ALLOW_GROUPS, true)
+                }
+                StickerBotConsole.append("Comandos de outras pessoas em grupos ATIVADOS.")
+            } else {
+                val privActive = binding.switchAllowPrivate.isChecked
+                binding.switchSelfOnly.isChecked = !privActive
+                prefs.edit {
+                    putBoolean(StickerBotFeature.PREF_BOT_ALLOW_GROUPS, false)
+                    putBoolean(StickerBotFeature.PREF_BOT_SELF_ONLY, !privActive)
+                }
+                StickerBotConsole.append("Comandos de outras pessoas em grupos desativados.")
+            }
+            updatingSwitches = false
+            notifyPrefsUpdated()
+        }
+
+        setupTerminalScrollTouch()
 
         binding.editPackName.addTextChangedListener(SimpleTextWatcher { value ->
             prefs.edit { putString(StickerBotFeature.PREF_BOT_PACK, value) }
@@ -160,6 +231,23 @@ class StickerBotActivity : BaseActivity() {
         renderLogs(StickerBotConsole.getAll())
     }
 
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupTerminalScrollTouch() {
+        val disallowParentIntercept = View.OnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            false
+        }
+        binding.terminalScroll.setOnTouchListener(disallowParentIntercept)
+        binding.tvTerminalOutput.setOnTouchListener(disallowParentIntercept)
+    }
+
     private fun renderLogs(lines: List<String>) {
         binding.tvTerminalOutput.text = lines.joinToString("\n")
         binding.terminalScroll.post {
@@ -200,35 +288,35 @@ class StickerBotActivity : BaseActivity() {
                     }
                 }
 
-                val outWebp = File(workDir, "figurinha_${System.currentTimeMillis()}.webp")
+                val sharedDir = runCatching {
+                    File(App.waEnhancerFolder, "Stickers").apply { mkdirs() }
+                }.getOrNull()?.takeIf { it.exists() && it.canWrite() } ?: workDir
+
+                val ts = System.currentTimeMillis()
+                val outWebp = File(sharedDir, "figurinha_$ts.webp")
                 outWebp.writeBytes(encoded.webpBytes)
 
                 if (isVideo && withSound) {
                     StickerBotConsole.append("Convertendo áudio para Ogg/Opus 48kHz (máx 10s)...")
-                    opusOut = AudioOpusConverter.convert(tempInput.absolutePath, 10_000_000L)
-                    if (opusOut != null && opusOut.exists() && opusOut.length() > 0) {
-                        StickerBotConsole.append("Áudio Opus gerado: ${opusOut.length() / 1024} KB")
+                    val converted = AudioOpusConverter.convert(tempInput.absolutePath, 10_000_000L)
+                    if (converted != null && converted.exists() && converted.length() > 0) {
+                        val sharedOpus = File(sharedDir, "figurinha_som_$ts.opus")
+                        converted.copyTo(sharedOpus, overwrite = true)
+                        converted.delete()
+                        opusOut = sharedOpus
+                        StickerBotConsole.append("Áudio Opus gerado: ${sharedOpus.length() / 1024} KB")
                     } else {
                         StickerBotConsole.append("Vídeo sem áudio; enviando figurinha animada.")
                         opusOut = null
                     }
                 }
 
-                val stickerUri = FileProvider.getUriForFile(
-                    this@StickerBotActivity,
-                    "${BuildConfig.APPLICATION_ID}.fileprovider",
-                    outWebp
-                )
-                val audioUri = opusOut?.let {
-                    FileProvider.getUriForFile(
-                        this@StickerBotActivity,
-                        "${BuildConfig.APPLICATION_ID}.fileprovider",
-                        it
-                    )
+                val targetPhone = withContext(Dispatchers.Main) {
+                    binding.editSelfPhone.text?.toString().orEmpty()
                 }
 
                 withContext(Dispatchers.Main) {
-                    shareGeneratedToWhatsApp(stickerUri, audioUri)
+                    sendToWhatsAppInBackground(outWebp, opusOut, targetPhone)
                 }
             } catch (e: Throwable) {
                 StickerBotConsole.append("Erro: ${e.message}")
@@ -244,25 +332,23 @@ class StickerBotActivity : BaseActivity() {
         }
     }
 
-    private fun shareGeneratedToWhatsApp(stickerUri: Uri, audioUri: Uri?) {
-        val sendIntent = if (audioUri != null) {
-            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                type = "*/*"
-                putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(stickerUri, audioUri))
+    private fun sendToWhatsAppInBackground(webpFile: File, opusFile: File?, targetPhone: String) {
+        val intent = Intent(StickerBotFeature.ACTION_STUDIO_SEND_STICKER).apply {
+            putExtra(StickerBotFeature.EXTRA_WEBP_PATH, webpFile.absolutePath)
+            if (opusFile != null && opusFile.exists()) {
+                putExtra(StickerBotFeature.EXTRA_OPUS_PATH, opusFile.absolutePath)
             }
-        } else {
-            Intent(Intent.ACTION_SEND).apply {
-                type = "image/webp"
-                putExtra(Intent.EXTRA_STREAM, stickerUri)
-            }
+            putExtra(StickerBotFeature.EXTRA_TARGET_PHONE, targetPhone)
         }
-        sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        runCatching {
-            packageManager.getPackageInfo(FeatureLoader.PACKAGE_WPP, 0)
-            sendIntent.setPackage(FeatureLoader.PACKAGE_WPP)
-        }
-        StickerBotConsole.append("Abrindo envio para o WhatsApp...")
-        startActivity(Intent.createChooser(sendIntent, getString(R.string.sticker_bot_title)))
+        sendBroadcast(intent)
+        StickerBotConsole.append(
+            "Enviado via Xposed para o WhatsApp (salvo nos Favoritos${if (opusFile != null) " + áudio Opus" else ""})!"
+        )
+        Toast.makeText(
+            this,
+            "Figurinha enviada para os Favoritos e conversa no WhatsApp!",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     private fun notifyPrefsUpdated() {

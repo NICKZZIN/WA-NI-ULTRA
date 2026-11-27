@@ -3813,6 +3813,48 @@ object Unobfuscator {
         }
     }
 
+    @JvmStatic
+    fun loadStickerModelClass(classLoader: ClassLoader): Class<*>? {
+        return runCatching {
+            UnobfuscatorCache.getInstance().getClass(classLoader) {
+                val styleClass = loadStickerStyleConstructor(classLoader).declaringClass
+                bridge.findClass {
+                    matcher {
+                        fields {
+                            add { type = styleClass.name }
+                            add { type = String::class.java.name }
+                            add { type = "int" }
+                        }
+                    }
+                }.firstOrNull()?.getInstance(classLoader)
+                    ?: throw ClassNotFoundException("Sticker model class not found")
+            }
+        }.getOrNull()
+    }
+
+    @JvmStatic
+    fun loadStickerSenderMethod(classLoader: ClassLoader): Method? {
+        return runCatching {
+            UnobfuscatorCache.getInstance().getMethod(classLoader) {
+                val stickerClass = loadStickerModelClass(classLoader)
+                    ?: throw ClassNotFoundException("Sticker model class not found")
+                val actionUserClass = runCatching { loadActionUser(classLoader) }.getOrNull()
+                actionUserClass?.declaredMethods?.firstOrNull { m ->
+                    val params = m.parameterTypes
+                    params.contains(stickerClass) && params.any { List::class.java.isAssignableFrom(it) }
+                }?.let { return@getMethod it }
+
+                bridge.findMethod {
+                    matcher {
+                        addParamType(stickerClass.name)
+                        addParamType(List::class.java.name)
+                    }
+                }.firstOrNull()?.getMethodInstance(classLoader)
+                    ?: throw NoSuchMethodException("StickerSender method not found")
+            }
+        }.getOrNull()
+    }
+
     fun loadStickerVideoFrameMethod(classLoader: ClassLoader): Method {
         return UnobfuscatorCache.getInstance().getMethod(classLoader) {
             bridge.findMethod {

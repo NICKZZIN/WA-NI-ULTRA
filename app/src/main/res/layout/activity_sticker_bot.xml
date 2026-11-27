@@ -76,6 +76,34 @@
                         android:textAppearance="?textAppearanceBodySmall"
                         android:textColor="?colorOnSurfaceVariant" />
 
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switchAllowPrivate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/spacing_small"
+                        android:text="@string/sticker_bot_allow_private" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sticker_bot_allow_private_sum"
+                        android:textAppearance="?textAppearanceBodySmall"
+                        android:textColor="?colorOnSurfaceVariant" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switchAllowGroups"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/spacing_small"
+                        android:text="@string/sticker_bot_allow_groups" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sticker_bot_allow_groups_sum"
+                        android:textAppearance="?textAppearanceBodySmall"
+                        android:textColor="?colorOnSurfaceVariant" />
+
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -266,10 +294,15 @@
                     <ScrollView
                         android:id="@+id/terminalScroll"
                         android:layout_width="match_parent"
-                        android:layout_height="180dp"
+                        android:layout_height="210dp"
                         android:layout_marginTop="6dp"
                         android:background="#0B0E11"
-                        android:padding="10dp">
+                        android:fadeScrollbars="false"
+                        android:fillViewport="true"
+                        android:nestedScrollingEnabled="true"
+                        android:padding="10dp"
+                        android:scrollbarStyle="insideOverlay"
+                        android:scrollbars="vertical">
 
                         <TextView
                             android:id="@+id/tvTerminalOutput"
@@ -278,7 +311,6 @@
                             android:fontFamily="monospace"
                             android:lineSpacingExtra="3dp"
                             android:textColor="#E2E8F0"
-                            android:textIsSelectable="true"
                             android:textSize="12sp" />
                     </ScrollView>
 

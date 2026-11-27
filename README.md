@@ -3,23 +3,22 @@
 Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed / Vector / YukiHookAPI 1.5), **100% gratuito**, **100% traduzido em Português** e com **Bot de Figurinhas e Áudio integrado** — sem chaves de API externas, sem pareamento e sem planos pagos.
 
 - **Telegram:** [@NickC137](https://t.me/NickC137)
-- **Versão atual:** `1.6.9`
+- **Versão atual:** `1.7.0`
 
 ---
 
-## Principais Novidades (v1.6.9)
+## Principais Novidades (v1.7.0)
 
 ### 1. Bot de Figurinhas e Áudio 100% Integrado (Sem Parear e 0% Bateria Parado)
-- **Sem QR Code / Sem Pareamento:** roda diretamente dentro do próprio WhatsApp via Xposed. Quando parado, não mantém conexões nem threads ativas (**0% de consumo de bateria em segundo plano**).
-- **Comandos no WhatsApp:**
-  - `!s` ou `!fig` — transforma foto ou vídeo (até 10s) em figurinha 512×512 com metadados EXIF personalizados (Pacote e Autor) e salva automaticamente nos **Favoritos**.
+- **Sem QR Code / Sem Pareamento / Envio 100% em Segundo Plano:** roda diretamente dentro do próprio WhatsApp via Xposed. Cria e envia a figurinha (e a nota de voz Opus no `!som`) silenciosamente em segundo plano **sem reiniciar o WhatsApp e sem abrir tela de pré-visualização**. Quando parado, não mantém conexões nem threads ativas (**0% de consumo de bateria em segundo plano**).
+- **Comandos no WhatsApp (funcionam na legenda da foto/vídeo, respondendo/marcando a mídia ou mandando logo em seguida):**
+  - `!s` ou `!fig` — transforma foto ou vídeo (até 10s) em figurinha 512×512 com metadados EXIF personalizados (Pacote e Autor), envia na conversa e salva automaticamente nos **Favoritos**.
   - `!fig inteiro` — mantém a imagem/vídeo inteira sem cortar (bordas transparentes).
-  - `!som` — cria a figurinha animada do vídeo **+ extrai e envia o áudio sincronizado em Ogg/Opus 48 kHz** usando conversor nativo C++.
+  - `!som` — cria a figurinha animada do vídeo **+ extrai e envia a nota de voz sincronizada em Ogg/Opus 48 kHz** logo abaixo da figurinha em segundo plano.
   - `!ajuda` — envia a lista de comandos no chat.
+- **Outras pessoas podem usar no seu Chat Privado (ou Grupos):** no painel do bot você pode ativar/desativar com 1 toque para que amigos enviem `!s`, `!fig`, `!som` e `!ajuda` na conversa privada com você e recebam a figurinha + áudio automaticamente em segundo plano!
 - **Atalho de 1 toque no WhatsApp:** segure o dedo em qualquer foto ou vídeo na conversa e toque em **Figurinha** / **Fig + Som**.
-- **Painel + Mini Terminal em Tempo Real:** card direto na tela inicial do app com:
-  - **Modo Seguro Anti-Ban** (processa apenas comandos enviados por você mesmo) + **Atalho direto `wa.me/+55...`** para abrir conversa consigo mesmo ou usar em grupo privado.
-  - **Criador Rápido** pela galeria e **Mini Console** exibindo logs ao vivo de cada etapa.
+- **Painel + Mini Terminal Rolável em Tempo Real:** card direto na tela inicial do app com controle de permissões (Só Eu / Chat Privado / Grupos), atalho `wa.me/+55...`, Criador Rápido e Mini Terminal com rolagem independente e botão Copiar.
 
 ### 2. Nova Página de Configurações do App, Backup pelo WhatsApp e Padrão Persistente
 - **Novo botão de ajustes no topo** (substituindo o antigo ícone `i`): concentra todas as opções de Backup e informações do app, deixando a Home mais limpa.
@@ -30,7 +29,7 @@ Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed /
 
 ### 3. Interface Mais Limpa, Busca Automática e Listas Dropdown
 - **Busca Dinâmica na Lupa:** indexa automaticamente qualquer função presente nos XMLs (sem precisar cadastrar IDs manualmente) e ignora acentos.
-- **Listas Expansíveis (Dropdown na mesma página):** as abas **Privacidade**, **Mídia** e **Personalização** agrupam suas opções em categorias recolhíveis que abrem na mesma tela (pode ser desativado em *Personalização → Listas expansíveis nas abas*).
+- **Listas Expansíveis em TODAS as abas (Dropdown na mesma página):** as abas **Geral** (*Geral, Tela Inicial, Conversa, Figurinhas, Status*), **Privacidade**, **Mídia** e **Personalização** agrupam suas opções em categorias recolhíveis que abrem na mesma tela ao tocar (pode ser desativado em *Personalização → Listas expansíveis nas abas*).
 - **Visual limpo:** removido o ícone redundante do app na barra interna, removidos os dados desnecessários de hardware na Home e removidas opções que exigiam chaves de API pagas/externas.
 - **Verificador de Atualizações corrigido:** verifica Releases do GitHub e, caso ainda não exista Release publicada, compara automaticamente pelo último commit da branch `master`.
 

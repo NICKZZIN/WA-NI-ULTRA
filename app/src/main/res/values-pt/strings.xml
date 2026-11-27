@@ -655,7 +655,7 @@
     <string name="disable_document_scanner">Desativar scanner de documentos</string>
     <string name="disable_document_scanner_sum">Desativa o scanner ML Kit no seletor de documentos (corrige fechamento inesperado em alguns aparelhos)</string>
     <string name="collapsible_categories">Listas expansíveis nas abas</string>
-    <string name="collapsible_categories_sum">Agrupa as opções em categorias recolhíveis na mesma página nas abas Privacidade, Mídia e Personalização</string>
+    <string name="collapsible_categories_sum">Agrupa as opções em categorias recolhíveis na mesma página nas abas Geral, Privacidade, Mídia e Personalização</string>
     <string name="app_settings_title">Configurações do App e Backup</string>
     <string name="export_choose_title">Exportar Configurações</string>
     <string name="export_save_device">Salvar arquivo no celular</string>
@@ -685,8 +685,12 @@
     <string name="sticker_bot_open_btn">Abrir Painel e Mini Terminal do Bot</string>
     <string name="sticker_bot_enabled">Ativar Bot de Figurinhas Integrado</string>
     <string name="sticker_bot_enabled_sum">Processa !s, !fig, !som e !ajuda direto no WhatsApp sem pareamento e sem gastar bateria em segundo plano</string>
-    <string name="sticker_bot_self_only">Modo Seguro Anti-Ban (Só mensagens minhas)</string>
-    <string name="sticker_bot_self_only_sum">Recomendado: responde apenas comandos enviados por você mesmo (use no seu chat pessoal ou grupo só com você)</string>
+    <string name="sticker_bot_self_only">Modo Só Eu (Apenas meus próprios comandos)</string>
+    <string name="sticker_bot_self_only_sum">Quando ativado, o bot responde apenas aos comandos enviados por você mesmo</string>
+    <string name="sticker_bot_allow_private">Permitir que outras pessoas usem no meu chat privado</string>
+    <string name="sticker_bot_allow_private_sum">Contatos que enviarem foto/vídeo com !s, !fig, !som ou !ajuda no seu privado recebem a figurinha automaticamente em segundo plano</string>
+    <string name="sticker_bot_allow_groups">Permitir que outras pessoas usem em grupos</string>
+    <string name="sticker_bot_allow_groups_sum">Permite que membros de grupos usem !s, !fig, !som e !ajuda (desative em grupos grandes para evitar spam)</string>
     <string name="sticker_bot_pack_name">Nome do Pacote da Figurinha</string>
     <string name="sticker_bot_pack_author">Autor da Figurinha</string>
     <string name="sticker_bot_safety_title">Guia Anti-Banimento e Atalho Pessoal</string>
