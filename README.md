@@ -2,8 +2,6 @@
 
 Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed / Vector / YukiHookAPI 1.5), **100% gratuito** e com todos os recursos desbloqueados — sem licenças, sem planos pagos e sem limitações.
 
-- **Desenvolvedor:** [NICKZZIN](https://github.com/NICKZZIN)
-- **Repositório:** [NICKZZIN/WA-NI-ULTRA](https://github.com/NICKZZIN/WA-NI-ULTRA)
 - **Telegram:** [@NickC137](https://t.me/NickC137)
 - **Versão atual:** `1.6.8`
 
