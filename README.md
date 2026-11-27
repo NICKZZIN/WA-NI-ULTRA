@@ -52,16 +52,3 @@ Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed /
 - **WhatsApp Business:** `2.26.40.xx` até **`2.26.46.xx`**
 
 ---
-
-## Como compilar e publicar atualização no GitHub
-
-1. Envie as alterações para o GitHub:
-   ```powershell
-   cd C:\Users\Pichau\Documents\ABOTS\WA-NI-ULTRA
-   git add -A
-   git commit -m "feat: WA-NI-ULTRA v1.6.9 com bot de figurinhas integrado, listas dropdown e novo sistema de backup"
-   git push origin master
-   ```
-2. Na aba **Actions** do seu GitHub:
-   - Rode **Build WhatsApp** / **Build Business** para gerar os APKs de teste, **ou**
-   - Rode **Release** para compilar os dois APKs e publicar automaticamente uma **Release oficial** no seu repositório!
