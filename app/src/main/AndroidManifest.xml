@@ -35,6 +35,7 @@
 
     <application
         android:forceQueryable="true"
+        android:extractNativeLibs="true"
         android:name=".App"
         android:allowBackup="true"
         android:icon="@mipmap/launcher"

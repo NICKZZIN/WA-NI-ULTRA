@@ -45,7 +45,24 @@ object WebpStickerEncoder {
     const val MAX_SOUND_STILL_DURATION_MS = 10_000L
     const val MAX_SOUND_LONG_ANIM_DURATION_MS = 10_000L
     const val MAX_SOUND_LONG_STILL_DURATION_MS = 20_000L
-    private const val MAX_EXTRACTED_FRAMES = 36
+    private const val MAX_EXTRACTED_FRAMES = 75
+
+    private data class AnimEncodingStep(
+        val maxFps: Int,
+        val quality: Int,
+        val detailSize: Int
+    )
+
+    // Smooth FPS ladder inspired by whatsapp-figurinhas-com-som & kuebot:
+    // preserves 12-15 FPS fluidity by reducing internal detail before dropping FPS.
+    private val ANIM_LADDER = arrayOf(
+        AnimEncodingStep(maxFps = 15, quality = 64, detailSize = 512),
+        AnimEncodingStep(maxFps = 15, quality = 46, detailSize = 512),
+        AnimEncodingStep(maxFps = 12, quality = 42, detailSize = 432),
+        AnimEncodingStep(maxFps = 12, quality = 32, detailSize = 360),
+        AnimEncodingStep(maxFps = 10, quality = 26, detailSize = 300),
+        AnimEncodingStep(maxFps = 8, quality = 18, detailSize = 256)
+    )
 
     enum class FitMode {
         CROP,     // cortar (padrão): preenche 512x512 cortando sobras
@@ -61,6 +78,7 @@ object WebpStickerEncoder {
         val keepDuration: Boolean = false,
         val stillFromVideo: Boolean = false,
         val longSound: Boolean = false,
+        val separateAudio: Boolean = false,
         val caption: String = "",
         val captionColor: Int = Color.WHITE,
         val soundSha256Base64: String? = null
@@ -205,57 +223,115 @@ object WebpStickerEncoder {
 
         try {
             val totalDurationMs = extracted.totalDurationMs.coerceAtLeast(300L)
-            // Step 0: all extracted frames; Step 1: half the frames (keeping exact total duration)
-            for (step in 0..1) {
-                val activeFrames = if (step == 0 || bitmaps.size <= 6) {
-                    bitmaps
-                } else {
-                    bitmaps.filterIndexed { index, _ -> index % 2 == 0 }
+            val sourceFps = (bitmaps.size * 1000.0 / totalDurationMs).coerceAtLeast(1.0)
+
+            for (stepIdx in ANIM_LADDER.indices) {
+                val step = ANIM_LADDER[stepIdx]
+                val effectiveFps = min(step.maxFps.toDouble(), sourceFps)
+                val picked = ArrayList<Bitmap>()
+                var k = 0
+                while (true) {
+                    val srcIdx = ((k * sourceFps) / effectiveFps).roundToInt()
+                    if (srcIdx >= bitmaps.size) break
+                    picked.add(bitmaps[srcIdx])
+                    k++
+                }
+                if (picked.size < 2 && bitmaps.size >= 2) {
+                    picked.clear()
+                    picked.add(bitmaps.first())
+                    picked.add(bitmaps.last())
                 }
 
-                for (qIdx in QUALITY_STEPS.indices) {
-                    val quality = QUALITY_STEPS[qIdx]
-                    val framePayloads = ArrayList<FrameBitstream>(activeFrames.size)
-                    var anyAlpha = false
+                val framePayloads = ArrayList<FrameBitstream>(picked.size)
+                var anyAlpha = false
 
-                    for (bmp in activeFrames) {
-                        val singleWebp = compressSingleWebp(bmp, quality)
+                for (bmp in picked) {
+                    val workingBmp = if (step.detailSize < STICKER_SIZE) {
+                        downscaleAndRestore512(bmp, step.detailSize)
+                    } else {
+                        bmp
+                    }
+                    try {
+                        val singleWebp = compressSingleWebp(workingBmp, step.quality)
                         val bitstream = extractFrameBitstream(singleWebp) ?: continue
                         if (bitstream.hasAlpha) anyAlpha = true
                         framePayloads.add(bitstream)
+                    } finally {
+                        if (workingBmp !== bmp) runCatching { workingBmp.recycle() }
                     }
+                }
 
-                    if (framePayloads.size < 2) {
-                        throw IllegalStateException("Falha ao codificar quadros WebP do vídeo/GIF.")
-                    }
+                if (framePayloads.size < 2) {
+                    throw IllegalStateException("Falha ao codificar quadros WebP do vídeo/GIF.")
+                }
 
-                    val muxed = muxAnimatedWebp(
-                        frames = framePayloads,
-                        totalDurationMs = totalDurationMs,
-                        hasAlpha = anyAlpha,
-                        packName = packName,
-                        author = author,
-                        soundSha256Base64 = opts.soundSha256Base64
+                val muxed = muxAnimatedWebp(
+                    frames = framePayloads,
+                    totalDurationMs = totalDurationMs,
+                    hasAlpha = anyAlpha,
+                    packName = packName,
+                    author = author,
+                    soundSha256Base64 = opts.soundSha256Base64
+                )
+
+                val isLastAttempt = stepIdx == ANIM_LADDER.lastIndex
+                if (muxed.size <= MAX_ANIMATED_BYTES || isLastAttempt) {
+                    onLog?.invoke(
+                        "Figurinha animada pronta: ${muxed.size / 1024} KB (${framePayloads.size} quadros @ ${effectiveFps.roundToInt()} fps, q=${step.quality})"
                     )
-
-                    val isLastAttempt = (step == 1 || bitmaps.size <= 6) && qIdx == QUALITY_STEPS.lastIndex
-                    if (muxed.size <= MAX_ANIMATED_BYTES || isLastAttempt) {
-                        onLog?.invoke(
-                            "Figurinha animada pronta: ${muxed.size / 1024} KB (${framePayloads.size} quadros, ${totalDurationMs / 1000f}s, q=$quality)"
-                        )
-                        return EncodedSticker(
-                            webpBytes = muxed,
-                            isAnimated = true,
-                            durationMs = totalDurationMs,
-                            frameCount = framePayloads.size
-                        )
-                    }
+                    return EncodedSticker(
+                        webpBytes = muxed,
+                        isAnimated = true,
+                        durationMs = totalDurationMs,
+                        frameCount = framePayloads.size
+                    )
                 }
             }
             throw IllegalStateException("Não foi possível comprimir a figurinha animada abaixo de 500 KB.")
         } finally {
             bitmaps.forEach { runCatching { it.recycle() } }
         }
+    }
+
+    private fun downscaleAndRestore512(source512: Bitmap, detailSize: Int): Bitmap {
+        val small = Bitmap.createScaledBitmap(source512, detailSize, detailSize, true)
+        return try {
+            val restored = Bitmap.createScaledBitmap(small, STICKER_SIZE, STICKER_SIZE, true)
+            restored.setHasAlpha(source512.hasAlpha())
+            restored
+        } finally {
+            if (small !== source512) runCatching { small.recycle() }
+        }
+    }
+
+    /**
+     * Reads the `sound-sha256` tag from a WebP sticker's EXIF block (returns null if absent).
+     */
+    @JvmStatic
+    fun readSoundSha256FromWebp(webpFile: File): String? {
+        if (!webpFile.exists() || webpFile.length() < 40L || webpFile.length() > 2_000_000L) return null
+        return runCatching {
+            val data = webpFile.readBytes()
+            if (data.size < 30) return@runCatching null
+            var offset = 12
+            while (offset + 8 <= data.size) {
+                val type = String(data, offset, 4, Charsets.US_ASCII)
+                val size = readUInt32LE(data, offset + 4)
+                if (size < 0 || offset + 8 + size > data.size) break
+                if (type == "EXIF" && size > 24) {
+                    val bodyStart = offset + 8
+                    val jsonLen = readUInt32LE(data, bodyStart + 14)
+                    if (jsonLen in 2..(size - 22)) {
+                        val jsonStr = String(data, bodyStart + 22, jsonLen, Charsets.UTF_8)
+                        val obj = JSONObject(jsonStr)
+                        val sha = obj.optString("sound-sha256", "").trim()
+                        if (sha.isNotEmpty()) return@runCatching sha
+                    }
+                }
+                offset += 8 + size + (size and 1)
+            }
+            null
+        }.getOrNull()
     }
 
     /**
@@ -307,32 +383,87 @@ object WebpStickerEncoder {
             val clipDurationMs = min(requestedMs, availableMs)
 
             val targetFps = when {
-                clipDurationMs <= 3_000L -> 10
-                clipDurationMs <= 6_000L -> 8
-                else -> 6
+                clipDurationMs <= 5_200L -> 15
+                clipDurationMs <= 7_500L -> 12
+                else -> 10
             }
-            val frameIntervalMs = (1000.0 / targetFps).roundToInt().coerceIn(85, 220)
+            val frameIntervalMs = (1000.0 / targetFps).roundToInt().coerceIn(66, 120)
             val totalFrames = (clipDurationMs / frameIntervalMs).toInt().coerceIn(2, MAX_EXTRACTED_FRAMES)
 
             onLog?.invoke(
-                "Extraindo $totalFrames quadros (${(clipDurationMs / 1000f)}s @ $targetFps fps)..."
+                "Extraindo $totalFrames quadros fluidos (${(clipDurationMs / 1000f)}s @ $targetFps fps)..."
             )
 
             val bitmaps = ArrayList<Bitmap>(totalFrames)
-            for (f in 0 until totalFrames) {
-                val frameTimeMs = startMs + (f.toLong() * clipDurationMs / totalFrames)
-                val timeUs = frameTimeMs * 1000L
-                val rawFrame = decodeRetrieverFrameAt(retriever, timeUs) ?: continue
 
-                val framed = frameBitmap512(
-                    source = rawFrame,
-                    fitMode = opts.fitMode,
-                    isOpaqueVideo = true,
-                    caption = opts.caption,
-                    captionColor = opts.captionColor
-                )
-                if (framed !== rawFrame) rawFrame.recycle()
-                bitmaps.add(framed)
+            // Fast & smooth API 28+ single-pass batch frame decoder (avoids keyframe seek stutter!)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                runCatching {
+                    val videoFrameCount = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)
+                        ?.toIntOrNull() ?: 0
+                    if (videoFrameCount >= 4 && rawDurationMs > 300L) {
+                        val firstIdx = ((startMs.toDouble() / rawDurationMs) * videoFrameCount)
+                            .toInt().coerceIn(0, videoFrameCount - 2)
+                        val endIdx = (((startMs + clipDurationMs).toDouble() / rawDurationMs) * videoFrameCount)
+                            .toInt().coerceIn(firstIdx + 1, videoFrameCount)
+                        val spanCount = (endIdx - firstIdx).coerceAtLeast(1)
+
+                        // Decode in small sequential batches of up to 16 frames to keep peak RAM low
+                        if (spanCount <= 180) {
+                            val wantedIndices = IntArray(totalFrames) { f ->
+                                (firstIdx + (f.toLong() * spanCount / totalFrames).toInt())
+                                    .coerceIn(firstIdx, endIdx - 1)
+                            }.distinct()
+
+                            var cursor = firstIdx
+                            var nextWantedPos = 0
+                            while (cursor < endIdx && nextWantedPos < wantedIndices.size) {
+                                val batchSize = min(16, endIdx - cursor)
+                                val batch = retriever.getFramesAtIndex(cursor, batchSize)
+                                for (bIdx in batch.indices) {
+                                    val absIdx = cursor + bIdx
+                                    val rawBmp = batch[bIdx]
+                                    if (nextWantedPos < wantedIndices.size && absIdx == wantedIndices[nextWantedPos]) {
+                                        val framed = frameBitmap512(
+                                            source = rawBmp,
+                                            fitMode = opts.fitMode,
+                                            isOpaqueVideo = true,
+                                            caption = opts.caption,
+                                            captionColor = opts.captionColor
+                                        )
+                                        if (framed !== rawBmp) rawBmp.recycle()
+                                        bitmaps.add(framed)
+                                        nextWantedPos++
+                                    } else {
+                                        rawBmp.recycle()
+                                    }
+                                }
+                                cursor += batchSize
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback: timestamp-based extraction if batch index metadata wasn't available
+            if (bitmaps.size < 2) {
+                bitmaps.forEach { runCatching { it.recycle() } }
+                bitmaps.clear()
+                for (f in 0 until totalFrames) {
+                    val frameTimeMs = startMs + (f.toLong() * clipDurationMs / totalFrames)
+                    val timeUs = frameTimeMs * 1000L
+                    val rawFrame = decodeRetrieverFrameAt(retriever, timeUs) ?: continue
+
+                    val framed = frameBitmap512(
+                        source = rawFrame,
+                        fitMode = opts.fitMode,
+                        isOpaqueVideo = true,
+                        caption = opts.caption,
+                        captionColor = opts.captionColor
+                    )
+                    if (framed !== rawFrame) rawFrame.recycle()
+                    bitmaps.add(framed)
+                }
             }
 
             // Fallback: if timestamp seeking yielded < 2 frames on a short GIF/MP4, extract by frame index (API 28+)

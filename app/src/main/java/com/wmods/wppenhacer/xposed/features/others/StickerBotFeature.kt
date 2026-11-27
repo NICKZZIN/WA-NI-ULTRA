@@ -124,6 +124,9 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
     private var stickerFieldMap: Map<String, Field> = emptyMap()
 
     @Volatile
+    private var concreteMediaDataClass: Class<*>? = null
+
+    @Volatile
     private var liveStickersDb: SQLiteDatabase? = null
 
     @Volatile
@@ -131,6 +134,8 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
 
     override fun doHook() {
         resolveInternalSenders()
+        SoundStickerEngine.liveDbProvider = { liveMsgStoreDb }
+        SoundStickerEngine.installHooks(this, classLoader)
         hookContentResolverForBotFiles()
         hookDatabaseMessageCommands()
         registerContextMenuShortcuts()
@@ -198,6 +203,10 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 isAccessible = true
             }
         }.onFailure { logDebug("resolveInternalSenders: originFMessageField", it) }
+
+        runCatching {
+            concreteMediaDataClass = Unobfuscator.loadConcreteMediaDataClass(classLoader)
+        }.onFailure { logDebug("resolveInternalSenders: concreteMediaDataClass", it) }
 
         runCatching {
             val sClass = Unobfuscator.loadStickerModelClass(classLoader)
@@ -471,6 +480,12 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             }
             val targetJid = activeJid ?: fallbackSelfJid
             val opusFile = opusPath?.let(::File)?.takeIf { it.exists() && it.length() > 0 }
+            if (opusFile != null) {
+                val oggBytes = opusFile.readBytes()
+                val sha = MessageDigest.getInstance("SHA-256").digest(oggBytes)
+                val shaB64 = Base64.encodeToString(sha, Base64.NO_WRAP)
+                SoundStickerEngine.saveLocalStickerSound(shaB64, oggBytes)
+            }
             val isAnimated = isAnimatedWebpBytes(webpBytes)
 
             if (!targetJid.isNullOrBlank()) {
@@ -480,6 +495,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                     plainHash = plainHash,
                     isAnimated = isAnimated,
                     opusFile = opusFile,
+                    separateAudioMode = false,
                     chatRawJid = targetJid,
                     chatRowId = -1L,
                     db = liveMsgStoreDb
@@ -634,12 +650,14 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                     val oggBytes = opusFile.readBytes()
                     val sha = MessageDigest.getInstance("SHA-256").digest(oggBytes)
                     soundSha256Base64 = Base64.encodeToString(sha, Base64.NO_WRAP)
+                    SoundStickerEngine.saveLocalStickerSound(soundSha256Base64, oggBytes)
                     StickerBotConsole.emitFromXposed(
                         app,
-                        "Áudio Opus pronto: ${oggBytes.size / 1024} KB (SHA-256 anexado ao EXIF)"
+                        "Áudio Ogg/Opus pronto: ${oggBytes.size / 1024} KB (salvo localmente + pronto para envio sonoro)"
                     )
                 } else {
-                    StickerBotConsole.emitFromXposed(app, "Mídia sem faixa de áudio audível; enviando figurinha sem som.")
+                    val reason = AudioOpusConverter.lastError ?: "sem áudio audível"
+                    StickerBotConsole.emitFromXposed(app, "Aviso no áudio ($reason); enviando figurinha sem som.")
                     opusFile = null
                 }
             }
@@ -693,13 +711,14 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 StickerBotConsole.emitFromXposed(app, "Figurinha salva nos Favoritos do WhatsApp!")
             }
 
-            // 2. Deliver sticker (+ Opus voice note if /figsom) silently in the background
+            // 2. Deliver sticker (+ embedded 134->1->26->26 sound sticker or Opus voice note) silently in the background
             deliverMediaToChat(
                 stickerFile = tempStickerFile,
                 webpBytes = encoded.webpBytes,
                 plainHash = plainHash,
                 isAnimated = encoded.isAnimated,
                 opusFile = opusFile,
+                separateAudioMode = effectiveOpts.separateAudio,
                 chatRawJid = chatRawJid,
                 chatRowId = chatRowId,
                 db = db ?: liveMsgStoreDb
@@ -809,8 +828,14 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
     }
 
     /**
-     * Sends the generated WebP sticker and (if present) the 48kHz Opus voice note directly
-     * to [chatRawJid] in the background without launching any preview Activity.
+     * Sends the generated WebP sticker and (when [opusFile] is present):
+     * - By default, uploads [opusFile] via WhatsApp's own MMS uploader and wraps the outgoing
+     *   `E2E$Message` into `134 -> 1 -> 26 (StickerMessage) -> 26 (AudioMessage)` (exact port of
+     *   `whatsapp-figurinhas-com-som/src/sound-sticker.ts`) so recipients receive a single native
+     *   Sound Sticker with the `🔊` icon, while `SoundStickerEngine`'s local player plays it on
+     *   tap on the sender's own phone!
+     * - If `separateAudioMode` (`/figsom separado`) is requested or protobuf wrapping falls back on
+     *   a remote chat, dispatches the synchronized 48 kHz Opus voice note right below the sticker.
      */
     private fun deliverMediaToChat(
         stickerFile: File,
@@ -818,6 +843,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         plainHash: String,
         isAnimated: Boolean,
         opusFile: File?,
+        separateAudioMode: Boolean,
         chatRawJid: String?,
         chatRowId: Long,
         db: SQLiteDatabase?
@@ -836,35 +862,96 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         } else {
             resolveChatRowIdByJid(activeDb, chatRawJid)
         }
-        val maxIdBefore = queryMaxMessageId(activeDb, effectiveChatRowId)
 
-        // 1. Try sending sticker via WhatsApp's native MediaType sender (mediaType = 20 = STICKER)
-        var stickerSent = invokeMediaTypeSender(
-            targetJid = targetJid,
-            mediaFile = stickerFile,
-            mediaType = MEDIA_TYPE_STICKER,
-            sourceType = 0,
-            isVoiceNote = false
-        )
+        val hasAudio = opusFile != null && opusFile.exists() && opusFile.length() > 0
+        val myRawJid = WppCore.getMyUserJid()?.let { it.phoneRawString ?: it.userRawString }
+        val isSelfChat = !myRawJid.isNullOrBlank() &&
+            chatRawJid.substringBefore('@') == myRawJid.substringBefore('@')
 
-        if (stickerSent && activeDb != null && effectiveChatRowId > 0L) {
-            Thread.sleep(650L)
-            if (queryMaxMessageId(activeDb, effectiveChatRowId) <= maxIdBefore) {
-                stickerSent = false
+        // Path A: Native Single Sound Sticker (134 -> 1 -> 26 -> 26)
+        if (hasAudio && !separateAudioMode && SoundStickerEngine.isProtoHookReady()) {
+            val opusBytes = opusFile!!.readBytes()
+            val uploadJidRaw = myRawJid ?: chatRawJid
+            val uploadJidObj = WppCore.createUserJid(uploadJidRaw) ?: targetJid
+            val uploadChatRowId = resolveChatRowIdByJid(activeDb, uploadJidRaw)
+
+            val audioProto = if (!isSelfChat) {
+                StickerBotConsole.emitFromXposed(app, "Subindo faixa Opus no MMS e montando pacote 134 › 26 › 26...")
+                SoundStickerEngine.uploadAndBuildAudioMessageProto(
+                    opusFile = opusFile,
+                    opusBytes = opusBytes,
+                    db = activeDb,
+                    selfChatRowId = uploadChatRowId
+                ) {
+                    invokeMediaTypeSender(
+                        targetJid = uploadJidObj,
+                        mediaFile = opusFile,
+                        mediaType = MEDIA_TYPE_AUDIO,
+                        sourceType = AUDIO_ORIGIN_VOICE_NOTE,
+                        isVoiceNote = true
+                    )
+                }
+            } else {
+                null
+            }
+
+            if (audioProto != null) {
+                val wrapped = SoundStickerEngine.sendWrappedSoundSticker(
+                    webpBytes = webpBytes,
+                    audioMessageProto = audioProto,
+                    isAnimated = isAnimated
+                ) {
+                    sendStickerBubble(targetJid, stickerFile, webpBytes, plainHash, isAnimated, activeDb, effectiveChatRowId)
+                }
+                if (wrapped || isSelfChat) {
+                    StickerBotConsole.emitFromXposed(
+                        app,
+                        "Figurinha com Som 🔊 enviada! Toque na figurinha para ouvir o áudio."
+                    )
+                    return
+                }
+                // Sticker was already sent inside sendWrappedSoundSticker, but 134 wrap didn't fire -> send Opus voice note fallback
+                StickerBotConsole.emitFromXposed(app, "Enviando áudio Opus sincronizado de apoio...")
+                Thread.sleep(350L)
+                invokeMediaTypeSender(
+                    targetJid = targetJid,
+                    mediaFile = opusFile,
+                    mediaType = MEDIA_TYPE_AUDIO,
+                    sourceType = AUDIO_ORIGIN_VOICE_NOTE,
+                    isVoiceNote = true
+                )
+                return
+            } else if (isSelfChat) {
+                // In self-chat on your own phone, SoundStickerEngine's 🔊 badge + tap-to-play plays local .opus directly!
+                val stickerSent = sendStickerBubble(
+                    targetJid,
+                    stickerFile,
+                    webpBytes,
+                    plainHash,
+                    isAnimated,
+                    activeDb,
+                    effectiveChatRowId
+                )
+                if (stickerSent) {
+                    StickerBotConsole.emitFromXposed(
+                        app,
+                        "Figurinha com Som 🔊 enviada no seu chat! Toque no ícone 🔊 na figurinha para ouvir."
+                    )
+                    return
+                }
             }
         }
 
-        // 2. Fallback to WhatsApp's dedicated Sticker model sender if needed
-        if (!stickerSent) {
-            stickerSent = invokeNativeStickerSender(
-                targetJid = targetJid,
-                stickerFile = stickerFile,
-                plainHash = plainHash,
-                fileSize = webpBytes.size,
-                isAnimated = isAnimated
-            )
-        }
-
+        // Path B: Plain sticker (or /figsom separado / fallback)
+        val stickerSent = sendStickerBubble(
+            targetJid,
+            stickerFile,
+            webpBytes,
+            plainHash,
+            isAnimated,
+            activeDb,
+            effectiveChatRowId
+        )
         if (stickerSent) {
             StickerBotConsole.emitFromXposed(app, "Figurinha enviada em segundo plano para $chatRawJid!")
         } else {
@@ -874,12 +961,11 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             )
         }
 
-        // 3. If /figsom was used, send the 48kHz Opus Voice Note right after the sticker
-        if (opusFile != null && opusFile.exists() && opusFile.length() > 0) {
+        if (hasAudio) {
             Thread.sleep(450L)
             val audioSent = invokeMediaTypeSender(
                 targetJid = targetJid,
-                mediaFile = opusFile,
+                mediaFile = opusFile!!,
                 mediaType = MEDIA_TYPE_AUDIO,
                 sourceType = AUDIO_ORIGIN_VOICE_NOTE,
                 isVoiceNote = true
@@ -890,6 +976,41 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 StickerBotConsole.emitFromXposed(app, "Não foi possível despachar a nota de voz Opus automaticamente.")
             }
         }
+    }
+
+    private fun sendStickerBubble(
+        targetJid: Any,
+        stickerFile: File,
+        webpBytes: ByteArray,
+        plainHash: String,
+        isAnimated: Boolean,
+        activeDb: SQLiteDatabase?,
+        effectiveChatRowId: Long
+    ): Boolean {
+        val maxIdBefore = queryMaxMessageId(activeDb, effectiveChatRowId)
+        var stickerSent = invokeMediaTypeSender(
+            targetJid = targetJid,
+            mediaFile = stickerFile,
+            mediaType = MEDIA_TYPE_STICKER,
+            sourceType = 0,
+            isVoiceNote = false
+        )
+        if (stickerSent && activeDb != null && effectiveChatRowId > 0L) {
+            Thread.sleep(650L)
+            if (queryMaxMessageId(activeDb, effectiveChatRowId) <= maxIdBefore) {
+                stickerSent = false
+            }
+        }
+        if (!stickerSent) {
+            stickerSent = invokeNativeStickerSender(
+                targetJid = targetJid,
+                stickerFile = stickerFile,
+                plainHash = plainHash,
+                fileSize = webpBytes.size,
+                isAnimated = isAnimated
+            )
+        }
+        return stickerSent
     }
 
     private fun invokeMediaTypeSender(
@@ -963,8 +1084,9 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
 
                 !pType.isPrimitive && !pType.isInterface &&
                     !pType.name.startsWith("java.") && !pType.name.startsWith("android.") &&
-                    ReflectionUtils.getFieldByExtendType(pType, File::class.java) != null -> {
-                    createMediaDataObject(pType, mediaFile, mediaType)
+                    isMediaDataParameter(pType) -> {
+                    val actualClass = concreteMediaDataClass?.takeIf { pType.isAssignableFrom(it) } ?: pType
+                    createMediaDataObject(actualClass, mediaFile, mediaType)
                 }
 
                 pType.isInterface -> {
@@ -1097,13 +1219,25 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         }
     }
 
+    private fun isMediaDataParameter(pType: Class<*>): Boolean {
+        val concrete = concreteMediaDataClass
+        if (concrete != null && pType != Any::class.java && pType.isAssignableFrom(concrete)) {
+            return true
+        }
+        return ReflectionUtils.findFieldUsingFilterIfExists(pType) {
+            it.type == File::class.java
+        } != null
+    }
+
     private fun createMediaDataObject(
         mediaDataClass: Class<*>,
         mediaFile: File,
         mediaType: Int
     ): Any? {
         val obj = instantiateObject(mediaDataClass) ?: return null
-        ReflectionUtils.getFieldByExtendType(mediaDataClass, File::class.java)?.apply {
+        ReflectionUtils.findFieldUsingFilterIfExists(mediaDataClass) {
+            it.type == File::class.java
+        }?.apply {
             isAccessible = true
             runCatching { set(obj, mediaFile) }
         }
@@ -1470,6 +1604,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         var durationMs: Long? = null
         var stillFromVideo = false
         var longSound = false
+        var separateAudio = false
         var captionColor: Int? = null
 
         var i = 0
@@ -1488,6 +1623,8 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 stillFromVideo = true
             } else if (isSoundCmd && norm in LONG_FLAGS && !longSound) {
                 longSound = true
+            } else if (isSoundCmd && norm in SEPARATE_FLAGS && !separateAudio) {
+                separateAudio = true
             } else if (rangeMatch != null && startMs == null) {
                 val aSec = parseTimeSeconds(rangeMatch.groupValues[1])
                 val bSec = parseTimeSeconds(rangeMatch.groupValues[2])
@@ -1528,6 +1665,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             keepDuration = isSoundCmd,
             stillFromVideo = stillFromVideo,
             longSound = longSound,
+            separateAudio = separateAudio,
             caption = caption,
             captionColor = captionColor ?: Color.WHITE
         )
@@ -1604,6 +1742,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
 
         private val STILL_FLAGS = setOf("parada", "parado", "estatica")
         private val LONG_FLAGS = setOf("longo", "longa", "estendido", "estendida")
+        private val SEPARATE_FLAGS = setOf("separado", "separados", "voz")
 
         private val CAPTION_COLORS = mapOf(
             "branco" to Color.parseColor("#FFFFFF"),

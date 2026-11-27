@@ -3,11 +3,11 @@
 Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed / Vector / YukiHookAPI 1.5), **100% gratuito**, **100% traduzido em Português** e com **Bot de Figurinhas e Áudio integrado** — sem chaves de API externas, sem pareamento e sem planos pagos.
 
 - **Telegram:** [@NickC137](https://t.me/NickC137)
-- **Versão atual:** `1.7.2`
+- **Versão atual:** `1.7.3`
 
 ---
 
-## Principais Novidades (v1.7.2)
+## Principais Novidades (v1.7.3)
 
 ### 1. Bot de Figurinhas e Áudio 100% Integrado (Sem Parear e 0% Bateria Parado)
 - **Sem QR Code / Sem Pareamento / Envio 100% em Segundo Plano:** roda diretamente dentro do próprio WhatsApp via Xposed. Cria e envia figurinhas estáticas (imagem) e animadas (vídeo/GIF) — além do áudio Ogg/Opus 48 kHz sincronizado no `/figsom` — silenciosamente em segundo plano **sem reiniciar o WhatsApp e sem abrir tela de pré-visualização**. Quando parado, não mantém conexões nem threads ativas (**0% de consumo de bateria em segundo plano**).

@@ -4040,6 +4040,40 @@ object Unobfuscator {
         }
     }
 
+    @JvmStatic
+    fun loadProtobufToByteArrayMethod(classLoader: ClassLoader): Method? {
+        return runCatching {
+            UnobfuscatorCache.getInstance().getMethod(classLoader) {
+                val abstractLite = findFirstClassUsingStrings(
+                    classLoader,
+                    StringMatchType.Contains,
+                    " threw an IOException (should never happen)."
+                ) ?: throw ClassNotFoundException("AbstractMessageLite not found")
+
+                abstractLite.declaredMethods.firstOrNull { m ->
+                    !Modifier.isStatic(m.modifiers) &&
+                        m.parameterCount == 0 &&
+                        m.returnType == ByteArray::class.java
+                } ?: throw NoSuchMethodException("AbstractMessageLite.toByteArray not found")
+            }
+        }.getOrNull()
+    }
+
+    @JvmStatic
+    fun loadConcreteMediaDataClass(classLoader: ClassLoader): Class<*>? {
+        return runCatching {
+            val abstractMedia = loadAbstractMediaMessageClass(classLoader)
+            for (field in abstractMedia.declaredFields) {
+                if (field.type.isPrimitive || field.type.isInterface) continue
+                val hasFile = ReflectionUtils.findFieldUsingFilterIfExists(field.type) {
+                    it.type == File::class.java
+                } != null
+                if (hasFile) return@runCatching field.type
+            }
+            null
+        }.getOrNull()
+    }
+
     private class BridgeRouter {
 
         private fun <T> execute(callable: DexKitManager.BridgeCallable<T>): T {

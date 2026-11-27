@@ -3,12 +3,16 @@ package com.wmods.wppenhacer.xposed.utils
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import android.os.Build
 import android.util.Log
+import com.wmods.wppenhacer.xposed.core.FeatureLoader
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.ShortBuffer
+import java.util.zip.ZipFile
 import kotlin.math.min
 
 object AudioOpusConverter {
@@ -18,12 +22,102 @@ object AudioOpusConverter {
     private const val OPUS_CHANNEL_COUNT = 1
     private const val TIMEOUT_US = 10_000L
 
+    @Volatile
+    private var nativeLoaded = false
+
+    @Volatile
+    var lastError: String? = null
+        private set
+
     init {
+        ensureNativeLoaded()
+    }
+
+    /**
+     * Loads `libaudio_opus_converter.so` reliably both inside `com.wmods.wppenhacer` and
+     * inside `com.whatsapp` / `com.whatsapp.w4b` when injected via LSPosed / YukiHookAPI.
+     */
+    @JvmStatic
+    @Synchronized
+    fun ensureNativeLoaded(): Boolean {
+        if (nativeLoaded) return true
+
+        // Stage 1: Standard System.loadLibrary (succeeds inside WA-NI-ULTRA app process)
         try {
             System.loadLibrary("audio_opus_converter")
-        } catch (e: Throwable) {
-            Log.e(TAG, "Failed to load audio_opus_converter", e)
+            nativeLoaded = true
+            lastError = null
+            return true
+        } catch (t: Throwable) {
+            lastError = "${t.javaClass.simpleName}: ${t.message}"
         }
+
+        val moduleInfo = runCatching { FeatureLoader.moduleContext.applicationInfo }.getOrNull()
+        if (moduleInfo != null) {
+            // Stage 2: Load from extracted module nativeLibraryDir
+            val nativeDir = moduleInfo.nativeLibraryDir
+            if (!nativeDir.isNullOrEmpty()) {
+                val soFile = File(nativeDir, "libaudio_opus_converter.so")
+                if (soFile.exists() && soFile.canRead()) {
+                    try {
+                        System.load(soFile.absolutePath)
+                        nativeLoaded = true
+                        lastError = null
+                        return true
+                    } catch (t: Throwable) {
+                        lastError = "Stage2(${soFile.absolutePath}): ${t.message}"
+                    }
+                }
+            }
+
+            // Stage 3: Load directly from uncompressed APK entry via Bionic linker (!/lib/<abi>/...)
+            val sourceApk = moduleInfo.sourceDir
+            if (!sourceApk.isNullOrEmpty()) {
+                for (abi in Build.SUPPORTED_ABIS) {
+                    try {
+                        System.load("$sourceApk!/lib/$abi/libaudio_opus_converter.so")
+                        nativeLoaded = true
+                        lastError = null
+                        return true
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
+
+            // Stage 4: Extract from module APK zip into host codeCacheDir as read-only (Android 14+ W^X compliant)
+            val hostApp = runCatching { Utils.application }.getOrNull()
+            if (!sourceApk.isNullOrEmpty() && hostApp != null) {
+                try {
+                    ZipFile(sourceApk).use { zip ->
+                        for (abi in Build.SUPPORTED_ABIS) {
+                            val entry = zip.getEntry("lib/$abi/libaudio_opus_converter.so") ?: continue
+                            val outDir = File(hostApp.codeCacheDir, "wae_jni").apply { mkdirs() }
+                            val outSo = File(outDir, "libaudio_opus_converter_${abi}_${entry.crc}.so")
+                            if (!outSo.exists() || outSo.length() != entry.size) {
+                                if (outSo.exists()) {
+                                    outSo.setWritable(true)
+                                    outSo.delete()
+                                }
+                                zip.getInputStream(entry).use { input ->
+                                    outSo.outputStream().use { output -> input.copyTo(output) }
+                                }
+                                outSo.setReadable(true, false)
+                                outSo.setExecutable(true, false)
+                                outSo.setReadOnly()
+                            }
+                            System.load(outSo.absolutePath)
+                            nativeLoaded = true
+                            lastError = null
+                            return true
+                        }
+                    }
+                } catch (t: Throwable) {
+                    lastError = "Stage4: ${t.javaClass.simpleName}: ${t.message}"
+                    Log.e(TAG, "Stage 4 load failed", t)
+                }
+            }
+        }
+        return false
     }
 
     @JvmStatic
@@ -48,9 +142,27 @@ object AudioOpusConverter {
         startUs: Long = 0L,
         autoFindLoudest: Boolean = false
     ): File? {
-        val targetDir = outputDir?.apply { mkdirs() } ?: File(filePath).parentFile
-        val outFile =
-            File(targetDir, "voice_note_${System.currentTimeMillis()}.opus")
+        val srcFile = File(filePath)
+        if (!srcFile.exists() || srcFile.length() == 0L) {
+            lastError = "Arquivo de origem não encontrado: $filePath"
+            return null
+        }
+
+        val targetDir = outputDir?.apply { mkdirs() } ?: srcFile.parentFile
+        val outFile = File(targetDir, "voice_note_${System.currentTimeMillis()}.opus")
+
+        // Fast-path: if input is already a valid Ogg/Opus voice note within duration & no trim requested
+        if (startUs <= 0L && !autoFindLoudest && isAlreadyShortOggOpus(srcFile, maxDurationUs)) {
+            return runCatching {
+                srcFile.copyTo(outFile, overwrite = true)
+                outFile
+            }.getOrNull()
+        }
+
+        if (!ensureNativeLoaded()) {
+            Log.e(TAG, "Native opus library unavailable: $lastError")
+            return null
+        }
 
         val effectiveStartUs = if (autoFindLoudest && startUs <= 0L && maxDurationUs < Long.MAX_VALUE / 2) {
             runCatching { findLoudestWindowStartUs(filePath, maxDurationUs) }.getOrDefault(0L)
@@ -65,7 +177,10 @@ object AudioOpusConverter {
         try {
             setDataSourceSafe(extractor, filePath)
             val audioTrack = selectAudioTrack(extractor)
-            if (audioTrack < 0) throw IOException("No audio track found in URI")
+            if (audioTrack < 0) {
+                lastError = "Sem faixa de áudio no arquivo"
+                return null
+            }
 
             extractor.selectTrack(audioTrack)
             if (effectiveStartUs > 0L) {
@@ -73,7 +188,7 @@ object AudioOpusConverter {
             }
             val inputFormat = extractor.getTrackFormat(audioTrack)
             val inputMime = inputFormat.getString(MediaFormat.KEY_MIME)
-                ?: throw IOException("No MIME type found")
+                ?: throw IOException("MIME de áudio ausente")
 
             decoder = MediaCodec.createDecoderByType(inputMime)
             decoder.configure(inputFormat, null, null, 0)
@@ -82,16 +197,22 @@ object AudioOpusConverter {
             encoderHandle =
                 nativeInitOpusEncoder(outFile.absolutePath, OPUS_SAMPLE_RATE, OPUS_CHANNEL_COUNT)
             if (encoderHandle == 0L) {
-                throw IOException("Failed to initialize native opus encoder")
+                throw IOException("Falha ao iniciar libopusenc em ${outFile.absolutePath}")
             }
 
             val writtenBytes = transcode(extractor, decoder, encoderHandle, effectiveStartUs, maxDurationUs)
-            if (writtenBytes < OPUS_SAMPLE_RATE * 2 / 10) {
-                throw IOException("Audio track too short or silent")
-            }
-            return outFile
+            nativeCloseOpusEncoder(encoderHandle)
+            encoderHandle = 0L
 
+            if (writtenBytes < OPUS_SAMPLE_RATE * 2 / 10 || !outFile.exists() || outFile.length() < 120L) {
+                lastError = "Faixa de áudio curta demais ou muda (${writtenBytes}B PCM)"
+                if (outFile.exists()) outFile.delete()
+                return null
+            }
+            lastError = null
+            return outFile
         } catch (e: Throwable) {
+            lastError = "${e.javaClass.simpleName}: ${e.message}"
             Log.e(TAG, "Conversion failed", e)
             if (outFile.exists()) outFile.delete()
             return null
@@ -112,11 +233,66 @@ object AudioOpusConverter {
         }
     }
 
+    /**
+     * Reads exact duration in seconds of an Ogg/Opus buffer from its final `OggS` granule position
+     * minus `OpusHead` pre-skip at 48 kHz (same formula as kuebot's `oggOpusSeconds`).
+     */
+    @JvmStatic
+    fun readOggOpusSeconds(oggBytes: ByteArray): Double {
+        if (oggBytes.size < 64) return 0.0
+        val headIdx = indexOfAscii(oggBytes, "OpusHead")
+        val preSkip = if (headIdx >= 0 && headIdx + 12 <= oggBytes.size) {
+            ((oggBytes[headIdx + 11].toInt() and 0xFF) shl 8) or (oggBytes[headIdx + 10].toInt() and 0xFF)
+        } else {
+            0
+        }
+        val lastOgg = lastIndexOfAscii(oggBytes, "OggS")
+        if (lastOgg < 0 || lastOgg + 14 > oggBytes.size) return 0.0
+        val granule = ByteBuffer.wrap(oggBytes, lastOgg + 6, 8).order(ByteOrder.LITTLE_ENDIAN).long
+        return ((granule - preSkip).coerceAtLeast(0L)).toDouble() / 48_000.0
+    }
+
+    private fun isAlreadyShortOggOpus(file: File, maxDurationUs: Long): Boolean {
+        if (file.length() > 240_000L || file.length() < 120L) return false
+        return runCatching {
+            val bytes = file.readBytes()
+            if (indexOfAscii(bytes, "OggS") != 0 || indexOfAscii(bytes, "OpusHead") < 0) {
+                return@runCatching false
+            }
+            val secs = readOggOpusSeconds(bytes)
+            secs > 0.15 && (secs * 1_000_000.0) <= maxDurationUs.toDouble() + 150_000.0
+        }.getOrDefault(false)
+    }
+
+    private fun indexOfAscii(haystack: ByteArray, needle: String): Int {
+        val n = needle.toByteArray(Charsets.US_ASCII)
+        if (haystack.size < n.size) return -1
+        outer@ for (i in 0..(haystack.size - n.size)) {
+            for (j in n.indices) {
+                if (haystack[i + j] != n[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
+
+    private fun lastIndexOfAscii(haystack: ByteArray, needle: String): Int {
+        val n = needle.toByteArray(Charsets.US_ASCII)
+        if (haystack.size < n.size) return -1
+        outer@ for (i in (haystack.size - n.size) downTo 0) {
+            for (j in n.indices) {
+                if (haystack[i + j] != n[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
+
     private fun setDataSourceSafe(extractor: MediaExtractor, filePath: String) {
         val file = File(filePath)
         if (file.exists()) {
             try {
-                java.io.FileInputStream(file).use { fis ->
+                FileInputStream(file).use { fis ->
                     extractor.setDataSource(fis.fd)
                 }
                 return
@@ -126,10 +302,6 @@ object AudioOpusConverter {
         extractor.setDataSource(filePath)
     }
 
-    /**
-     * Finds the start timestamp (in microseconds) of the loudest window of length [windowDurationUs],
-     * skipping leading/trailing silence (inspired by kuebot / StikSound).
-     */
     private fun findLoudestWindowStartUs(filePath: String, windowDurationUs: Long): Long {
         val extractor = MediaExtractor()
         try {
@@ -274,24 +446,18 @@ object AudioOpusConverter {
         return totalPcmBytes
     }
 
-    /**
-     * Applies a 15ms linear fade-in and fade-out on 48kHz 16-bit mono PCM
-     * to prevent audio clicks at trim boundaries (same as kuebot's afade=d=0.015).
-     */
     private fun applyEdgeFade15ms(pcmBytes: ByteArray) {
         val totalSamples = pcmBytes.size / 2
-        val fadeSamples = min(totalSamples / 2, (OPUS_SAMPLE_RATE * 15) / 1000) // 720 samples @ 48kHz
+        val fadeSamples = min(totalSamples / 2, (OPUS_SAMPLE_RATE * 15) / 1000)
         if (fadeSamples <= 1) return
         for (i in 0 until fadeSamples) {
             val factor = i.toFloat() / fadeSamples.toFloat()
-            // Fade-in sample
             val inOffset = i * 2
             val inSample = ((pcmBytes[inOffset + 1].toInt() shl 8) or (pcmBytes[inOffset].toInt() and 0xFF)).toShort()
             val fadedIn = (inSample * factor).toInt().toShort()
             pcmBytes[inOffset] = (fadedIn.toInt() and 0xFF).toByte()
             pcmBytes[inOffset + 1] = ((fadedIn.toInt() shr 8) and 0xFF).toByte()
 
-            // Fade-out sample
             val outIdx = totalSamples - 1 - i
             val outOffset = outIdx * 2
             val outSample = ((pcmBytes[outOffset + 1].toInt() shl 8) or (pcmBytes[outOffset].toInt() and 0xFF)).toShort()
