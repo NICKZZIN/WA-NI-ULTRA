@@ -1,19 +1,20 @@
 [WA-NI-ULTRA 1.6.8]
 
-[NEW - Ported & Enhanced from WaEnhancerX]
-* Enhanced Message Device Source (CaptureDevice): detects whether a message was sent from a primary Phone or a Linked Device (Desktop/Web/Companion) across all incoming stanza arguments with JID fallback and tap-to-explain Toast
-* Bypass Screenshot Restriction: removes FLAG_SECURE so you can take screenshots and record screen on View Once media, profile photos, and locked chats
-* Parallel Media Downloading: accelerates downloads of large WhatsApp media (6 MB+) with configurable concurrent HTTP Range connections (2/4/6/8) and automatic sequential fallback
-* Hide Locked Chat Notifications: independently silences Android notifications from locked chats without hiding them from lists
-* Visual Edit History Diff: edited message history now highlights removed text (red strikethrough) and added text (green bold)
-* Custom AB Props: override any WhatsApp internal AB feature flag directly in General settings
-
-[SYNCED - WaEnhancer 1.6.2 -> 1.6.7]
+[NEW]
 * Added support for WhatsApp and WhatsApp Business up to 2.26.46.xx
-* Migrated to YukiHookAPI 1.5 (libxposed API 101), DexKit 2.3.0, binary unobfuscator cache, and ViewHookDispatcher for major startup/runtime speedups
+* Enhanced Message Device Source: shows whether a message was sent via Phone or Linked Device (Desktop/Web/Companion) with tap-to-explain Toast
+* Bypass Screenshot Restriction: removes FLAG_SECURE to allow screenshots and screen recording on View Once media, profile photos, and locked chats
+* Parallel Media Downloading: accelerates downloads of large media (6 MB+) with configurable concurrent HTTP Range connections (2/4/6/8) and automatic fallback
+* Hide Locked Chat Notifications: silences Android notifications from locked chats independently
+* Visual Edit History Diff: highlights removed text (red strikethrough) and added text (green bold) in edited message history
+* Custom AB Props: override internal WhatsApp feature flags directly in General settings
 * Voice note speed slider, high quality voice notes (48 kHz) with configurable noise suppression, unsupported AAC audio transcoding, video note download, and status expiration time
 * Deleted Message Capture & Backup Viewer
 * Native message scheduling & View Once text sending
-* Redesigned per-contact Custom Privacy (LID-based dropdown) and Hide Delivered Receipt for unknown numbers
+* Redesigned per-contact Custom Privacy (LID-based) and Hide Delivered Receipt for unknown numbers
 * Enhanced Locked Chats (hides locked contacts from calls, contact picker, status updates & playback)
-* Full Meta AI disable flags, CustomThemeV2 improvements, and RootDiagnostics fixes (Magisk DenyList & Hide My App List)
+* Complete Meta AI disable flags, CustomThemeV2 upgrades, and RootDiagnostics improvements
+
+[PERFORMANCE & ENGINE]
+* Upgraded to YukiHookAPI 1.5 (libxposed API 101), DexKit 2.3.0 on-demand bridge, binary unobfuscator cache, reflection caching, and shared ViewHookDispatcher
+* 100% free — all features unlocked with zero paywalls or license checks
