@@ -40,16 +40,56 @@ object ConfigBackupManager {
     const val PREF_ENABLE_WA_SHARE = "enable_whatsapp_config_share"
     const val PREF_AUTO_IMPORT_WA = "auto_import_whatsapp_config"
     private const val PREF_INITIALIZED = "__initialized_prefs"
+    private const val PREF_PROMPTED_INITIAL_RESTORE = "__prompted_initial_restore"
     private const val CONFIG_MARKER_KEY = "__wa_ni_ultra_config"
+
+    @Volatile
+    private var promptedStorageThisSession = false
 
     private val INTERNAL_KEYS = setOf(
         PREF_INITIALIZED,
+        PREF_PROMPTED_INITIAL_RESTORE,
         CONFIG_MARKER_KEY
     )
 
     private fun persistentExternalFile(): File {
         val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         return File(File(docs, "WA-NI-ULTRA"), "default_config.json")
+    }
+
+    private fun persistentDownloadFallbackFile(): File {
+        val dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        return File(File(dl, "WaEnhancer"), "default_config.json")
+    }
+
+    private fun findExternalPersistentDefaultFile(): File? {
+        val candidates = listOf(
+            persistentExternalFile(),
+            persistentDownloadFallbackFile()
+        )
+        for (f in candidates) {
+            if (runCatching { f.exists() && f.canRead() && f.length() > 2 }.getOrDefault(false)) {
+                return f
+            }
+        }
+        // Also check latest WA-NI-ULTRA_config_*.json in Documents/WA-NI-ULTRA or Download/WaEnhancer or Download
+        val searchDirs = listOfNotNull(
+            runCatching { File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "WA-NI-ULTRA") }.getOrNull(),
+            runCatching { File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "WaEnhancer") }.getOrNull(),
+            runCatching { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) }.getOrNull()
+        )
+        for (dir in searchDirs) {
+            val latest = runCatching {
+                dir.listFiles { file ->
+                    file.isFile &&
+                        file.name.startsWith("WA-NI-ULTRA_config_", ignoreCase = true) &&
+                        file.name.endsWith(".json", ignoreCase = true) &&
+                        file.length() > 2
+                }?.maxByOrNull { it.lastModified() }
+            }.getOrNull()
+            if (latest != null) return latest
+        }
+        return null
     }
 
     private fun internalFallbackFile(context: Context): File =
@@ -67,30 +107,57 @@ object ConfigBackupManager {
     }
 
     fun hasPersistentDefault(context: Context): Boolean {
-        val ext = runCatching { persistentExternalFile().takeIf { it.exists() && it.length() > 2 } }.getOrNull()
-        if (ext != null) return true
+        if (findExternalPersistentDefaultFile() != null) return true
         val internal = internalFallbackFile(context)
         return internal.exists() && internal.length() > 2
     }
 
     /**
-     * Called on Application startup: if preferences were wiped (fresh install / reinstall)
-     * and a user-saved persistent default exists on the device, restores it automatically.
+     * Checks storage access on app launch/resume:
+     * 1) If All Files Access is not granted yet, requests it once per session.
+     * 2) Once storage permission is granted, checks once per install if a saved configuration
+     *    backup exists on the device and asks the user if they want to restore it.
      */
-    @JvmStatic
-    fun restorePersistentDefaultIfNeeded(context: Context, prefs: SharedPreferences) {
-        if (prefs.getBoolean(PREF_INITIALIZED, false)) return
-        val sourceFile = runCatching {
-            persistentExternalFile().takeIf { it.exists() && it.canRead() }
-        }.getOrNull() ?: internalFallbackFile(context).takeIf { it.exists() && it.canRead() }
-
-        if (sourceFile != null) {
-            runCatching {
-                val jsonText = sourceFile.readText(Charsets.UTF_8)
-                applyJsonStringToPrefs(prefs, jsonText)
+    fun checkInitialStorageAndBackupRestore(activity: Activity, onRestored: (() -> Unit)? = null) {
+        if (!hasStorageAccess(activity)) {
+            if (!promptedStorageThisSession) {
+                promptedStorageThisSession = true
+                App.showRequestStoragePermission(activity)
             }
+            return
         }
-        prefs.edit { putBoolean(PREF_INITIALIZED, true) }
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(activity)
+        if (prefs.getBoolean(PREF_PROMPTED_INITIAL_RESTORE, false)) return
+
+        prefs.edit {
+            putBoolean(PREF_PROMPTED_INITIAL_RESTORE, true)
+            putBoolean(PREF_INITIALIZED, true)
+        }
+
+        val backupFile = findExternalPersistentDefaultFile()
+            ?: internalFallbackFile(activity).takeIf { it.exists() && it.canRead() && it.length() > 2 }
+            ?: return
+
+        val jsonText = runCatching { backupFile.readText(Charsets.UTF_8) }.getOrNull() ?: return
+        val parsedEntries = runCatching { parseConfigEntries(JSONObject(jsonText)) }.getOrNull()
+        if (parsedEntries.isNullOrEmpty()) return
+
+        MaterialAlertDialogBuilder(activity)
+            .setTitle(R.string.restore_found_backup_title)
+            .setMessage(R.string.restore_found_backup_message)
+            .setPositiveButton(R.string.restore_now) { _, _ ->
+                writeEntriesToPrefs(prefs, parsedEntries, preserveAutoImport = null)
+                prefs.edit {
+                    putBoolean(PREF_PROMPTED_INITIAL_RESTORE, true)
+                    putBoolean(PREF_INITIALIZED, true)
+                }
+                restartWhatsAppApps()
+                Toast.makeText(activity, R.string.default_config_restored, Toast.LENGTH_LONG).show()
+                onRestored?.invoke()
+            }
+            .setNegativeButton(R.string.no, null)
+            .show()
     }
 
     fun saveAsPersistentDefault(activity: Activity) {
@@ -105,8 +172,16 @@ object ConfigBackupManager {
             val extFile = persistentExternalFile()
             extFile.parentFile?.mkdirs()
             extFile.writeText(jsonText, Charsets.UTF_8)
+            runCatching {
+                val dlFile = persistentDownloadFallbackFile()
+                dlFile.parentFile?.mkdirs()
+                dlFile.writeText(jsonText, Charsets.UTF_8)
+            }
             internalFallbackFile(activity).writeText(jsonText, Charsets.UTF_8)
-            prefs.edit { putBoolean(PREF_INITIALIZED, true) }
+            prefs.edit {
+                putBoolean(PREF_INITIALIZED, true)
+                putBoolean(PREF_PROMPTED_INITIAL_RESTORE, true)
+            }
 
             Toast.makeText(activity, R.string.default_config_saved, Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
@@ -276,13 +351,14 @@ object ConfigBackupManager {
                 .setItems(options) { _, which ->
                     when (which) {
                         0 -> {
-                            val file = runCatching {
-                                persistentExternalFile().takeIf { it.exists() }
-                            }.getOrNull() ?: internalFallbackFile(activity)
+                            val file = findExternalPersistentDefaultFile() ?: internalFallbackFile(activity)
                             runCatching {
                                 val text = file.readText(Charsets.UTF_8)
                                 applyJsonStringToPrefs(prefs, text)
-                                prefs.edit { putBoolean(PREF_INITIALIZED, true) }
+                                prefs.edit {
+                                    putBoolean(PREF_INITIALIZED, true)
+                                    putBoolean(PREF_PROMPTED_INITIAL_RESTORE, true)
+                                }
                                 restartWhatsAppApps()
                                 Toast.makeText(activity, R.string.default_config_restored, Toast.LENGTH_SHORT).show()
                                 onResetDone?.invoke()
@@ -316,6 +392,7 @@ object ConfigBackupManager {
         prefs.edit {
             prefs.all.keys.toList().forEach { remove(it) }
             putBoolean(PREF_INITIALIZED, true)
+            putBoolean(PREF_PROMPTED_INITIAL_RESTORE, true)
         }
         restartWhatsAppApps()
         Toast.makeText(context, R.string.configs_reset, Toast.LENGTH_SHORT).show()
@@ -373,6 +450,7 @@ object ConfigBackupManager {
                 if (key !in INTERNAL_KEYS) remove(key)
             }
             putBoolean(PREF_INITIALIZED, true)
+            putBoolean(PREF_PROMPTED_INITIAL_RESTORE, true)
             for ((key, value) in entries) {
                 if (key in INTERNAL_KEYS) continue
                 when (value) {

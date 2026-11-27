@@ -3,28 +3,30 @@
 Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed / Vector / YukiHookAPI 1.5), **100% gratuito**, **100% traduzido em Português** e com **Bot de Figurinhas e Áudio integrado** — sem chaves de API externas, sem pareamento e sem planos pagos.
 
 - **Telegram:** [@NickC137](https://t.me/NickC137)
-- **Versão atual:** `1.7.0`
+- **Versão atual:** `1.7.1`
 
 ---
 
-## Principais Novidades (v1.7.0)
+## Principais Novidades (v1.7.1)
 
 ### 1. Bot de Figurinhas e Áudio 100% Integrado (Sem Parear e 0% Bateria Parado)
-- **Sem QR Code / Sem Pareamento / Envio 100% em Segundo Plano:** roda diretamente dentro do próprio WhatsApp via Xposed. Cria e envia a figurinha (e a nota de voz Opus no `!som`) silenciosamente em segundo plano **sem reiniciar o WhatsApp e sem abrir tela de pré-visualização**. Quando parado, não mantém conexões nem threads ativas (**0% de consumo de bateria em segundo plano**).
+- **Sem QR Code / Sem Pareamento / Envio 100% em Segundo Plano:** roda diretamente dentro do próprio WhatsApp via Xposed. Cria e envia figurinhas estáticas (imagem) e animadas (vídeo/GIF) — além da nota de voz Opus no `!som` — silenciosamente em segundo plano **sem reiniciar o WhatsApp e sem abrir tela de pré-visualização**. Quando parado, não mantém conexões nem threads ativas (**0% de consumo de bateria em segundo plano**).
 - **Comandos no WhatsApp (funcionam na legenda da foto/vídeo, respondendo/marcando a mídia ou mandando logo em seguida):**
-  - `!s` ou `!fig` — transforma foto ou vídeo (até 10s) em figurinha 512×512 com metadados EXIF personalizados (Pacote e Autor), envia na conversa e salva automaticamente nos **Favoritos**.
+  - `!s` ou `!fig` — transforma foto, GIF ou vídeo (até 10s) em figurinha 512×512 com metadados EXIF personalizados (Pacote e Autor), envia na conversa e salva automaticamente nos **Favoritos**.
   - `!fig inteiro` — mantém a imagem/vídeo inteira sem cortar (bordas transparentes).
   - `!som` — cria a figurinha animada do vídeo **+ extrai e envia a nota de voz sincronizada em Ogg/Opus 48 kHz** logo abaixo da figurinha em segundo plano.
   - `!ajuda` — envia a lista de comandos no chat.
 - **Outras pessoas podem usar no seu Chat Privado (ou Grupos):** no painel do bot você pode ativar/desativar com 1 toque para que amigos enviem `!s`, `!fig`, `!som` e `!ajuda` na conversa privada com você e recebam a figurinha + áudio automaticamente em segundo plano!
-- **Atalho de 1 toque no WhatsApp:** segure o dedo em qualquer foto ou vídeo na conversa e toque em **Figurinha** / **Fig + Som**.
-- **Painel + Mini Terminal Rolável em Tempo Real:** card direto na tela inicial do app com controle de permissões (Só Eu / Chat Privado / Grupos), atalho `wa.me/+55...`, Criador Rápido e Mini Terminal com rolagem independente e botão Copiar.
+- **Atalho de 1 toque no WhatsApp (Opcional):** segure o dedo em qualquer foto ou vídeo na conversa e toque em **Figurinha** (pode ser ativado ou desativado no painel do Bot de Figurinhas caso prefira usar apenas comandos).
+- **Painel + Mini Terminal Rolável em Tempo Real:** card direto na tela inicial do app com controle de permissões (Só Eu / Chat Privado / Grupos), opção de ocultar o botão do menu do WhatsApp, atalho `wa.me/+55...`, Criador Rápido e Mini Terminal com rolagem independente e botão Copiar.
 
-### 2. Nova Página de Configurações do App, Backup pelo WhatsApp e Padrão Persistente
+### 2. Nova Página de Configurações do App, Backup Automático na Instalação e Assinatura Fixa
+- **Assinatura permanente do APK:** todas as atualizações usam a mesma chave de assinatura, permitindo atualizar o app por cima sem precisar desinstalar.
+- **Detecção automática de Backup ao instalar:** ao abrir o app pela primeira vez, ele solicita permissão de acesso aos arquivos e verifica automaticamente se existe um backup salvo no aparelho (`Documents/WA-NI-ULTRA/default_config.json`), perguntando se você deseja restaurar suas configurações na hora.
 - **Novo botão de ajustes no topo** (substituindo o antigo ícone `i`): concentra todas as opções de Backup e informações do app, deixando a Home mais limpa.
 - **Exportar para Celular ou WhatsApp:** escolha salvar o `.json` no aparelho ou enviar direto para o WhatsApp.
 - **Importar clicando no arquivo pelo próprio WhatsApp:** basta tocar no arquivo de configuração dentro do WhatsApp para abrir o WA-NI-ULTRA com caixa de confirmação e opção **"Sempre importar automaticamente"** (ambos configuráveis em Geral).
-- **Tornar configuração atual meu Padrão:** salva um arquivo padrão persistente em `Documents/WA-NI-ULTRA/default_config.json`. Mesmo desinstalando e instalando o app do zero, ele restaura automaticamente o seu padrão salvo!
+- **Tornar configuração atual meu Padrão:** salva um arquivo padrão persistente em `Documents/WA-NI-ULTRA/default_config.json`.
 - **Redefinir com confirmação dupla:** pergunta antes de redefinir e permite escolher entre **Restaurar meu padrão salvo** ou **Redefinir tudo (tudo desativado)**.
 
 ### 3. Interface Mais Limpa, Busca Automática e Listas Dropdown
@@ -50,5 +52,8 @@ Módulo Xposed completo para **WhatsApp** e **WhatsApp Business** (via LSPosed /
 
 - **WhatsApp:** `2.26.40.xx` até **`2.26.46.xx`**
 - **WhatsApp Business:** `2.26.40.xx` até **`2.26.46.xx`**
+<<<<<<< HEAD
 
 ---
+=======
+>>>>>>> bd0792b1 (fix: WA-NI-ULTRA v1.7.1 figurinhas animadas, opcao ocultar atalho, assinatura fixa e restauracao de backup ao instalar)

@@ -110,6 +110,13 @@ class MainActivity : BaseActivity() {
         handleIncomingIntent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        ConfigBackupManager.checkInitialStorageAndBackupRestore(this) {
+            recreate()
+        }
+    }
+
     private fun createMainDir() {
         val nomedia = File(App.waEnhancerFolder, ".nomedia")
         if (nomedia.exists()) nomedia.delete()

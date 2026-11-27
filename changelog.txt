@@ -1,10 +1,9 @@
-[WA-NI-ULTRA 1.7.0]
+[WA-NI-ULTRA 1.7.1]
 
 [NEW]
-* Integrated Sticker & Sound Bot (zero pairing, 0% idle battery): create static image, animated video, and synchronized 48 kHz Opus voice-note stickers via !s, !fig, !som, !ajuda (works in captions, replies, and follow-up messages), 1-tap message popup, or Direct Studio + scrollable Live Mini Console + multi-user support in private chats & groups
+* Integrated Sticker & Sound Bot (zero pairing, 0% idle battery): fixed animated video/GIF WebP muxing & saving, optional toggle to hide the context-menu shortcut button in WhatsApp, and synchronized 48 kHz Opus voice-note stickers only when requested (!som)
+* Consistent APK Signing: fixed permanent keystore across all builds so updates install cleanly without uninstalling
+* Automatic Storage Permission & Backup Restore Prompt on Install: requests All Files Access on first launch and automatically checks if a saved configuration backup exists on the device, asking if you want to restore it
 * Collapsible Dropdown Categories Across ALL Tabs: General (Geral, Tela Inicial, Conversa, Figurinhas, Status), Privacy, Media, and Customization now expand inline on the same page (can be toggled in Customization)
 * Dynamic Search Bar: automatically indexes every preference in XML screens without manual ID registration (with accent-insensitive matching)
-* App Settings & Backup Hub: top-bar settings page with Export to Device or Share via WhatsApp, 1-tap WhatsApp file import (with optional auto-import), Persistent Device Default (survives app reinstall), and Reset confirmation dialog
-* Fixed GitHub Update Checker: supports both GitHub Releases and automatic master commit SHA fallback
-* Complete 100% Brazilian Portuguese translations across all screens and removed external API-key features
 * Supported WhatsApp & WhatsApp Business versions: 2.26.40.xx through 2.26.46.xx

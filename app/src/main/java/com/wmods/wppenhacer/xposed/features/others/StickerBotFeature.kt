@@ -126,6 +126,9 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
 
     private fun isBotEnabled(): Boolean = xprefs.getBoolean(PREF_BOT_ENABLED, true)
 
+    private fun isContextShortcutEnabled(): Boolean =
+        xprefs.getBoolean(PREF_BOT_CONTEXT_SHORTCUT, true)
+
     private fun canProcessCommand(fromMe: Boolean, chatJid: String): Boolean {
         if (fromMe) return true
         if (xprefs.getBoolean(PREF_BOT_SELF_ONLY, false)) return false
@@ -382,13 +385,12 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
 
     private fun registerContextMenuShortcuts() {
         ContextMenuActionProvider.register { _, _, fMessage ->
-            if (!isBotEnabled() || !fMessage.isMediaFile) return@register null
+            if (!isBotEnabled() || !isContextShortcutEnabled() || !fMessage.isMediaFile) return@register null
             val file = fMessage.mediaFile ?: return@register null
             if (!file.exists()) return@register null
-            val isVid = isVideoFile(file)
-            val label = if (isVid) "Fig + Som" else "Figurinha"
+            val isVid = isVideoFile(file) || fMessage.mediaType == 3 || fMessage.mediaType == 13
             ContextMenuActionProvider.ContextMenuAction(
-                title = label,
+                title = "Figurinha",
                 icon = R.drawable.ic_media,
                 autoDismiss = true
             ) {
@@ -398,7 +400,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                     createAndDeliverSticker(
                         mediaFile = file,
                         isVideo = isVid,
-                        withAudio = isVid,
+                        withAudio = false,
                         fullFrame = false,
                         chatRawJid = chatJid,
                         chatRowId = -1L,
@@ -514,8 +516,10 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
             }
 
             completedKeys.add(keyId)
-            val isVideo = isVideoFile(mediaPath) || messageType == 3 || messageType == 13
-            val wantAudio = (cmd == BotCmd.SOUND_STICKER) && isVideo
+            val isGif = messageType == 13 || mediaPath.extension.equals("gif", ignoreCase = true) ||
+                mediaPath.parentFile?.name?.contains("Gif", ignoreCase = true) == true
+            val isVideo = isVideoFile(mediaPath) || messageType == 3 || isGif
+            val wantAudio = (cmd == BotCmd.SOUND_STICKER) && isVideo && !isGif
             createAndDeliverSticker(
                 mediaFile = mediaPath,
                 isVideo = isVideo,
@@ -564,10 +568,11 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 }
             }
 
+            val workDir = File(app.cacheDir, "sticker_bot").apply { mkdirs() }
             var opusFile: File? = null
             if (withAudio) {
                 StickerBotConsole.emitFromXposed(app, "Convertendo áudio para Nota de Voz Opus 48kHz (máx 10s)...")
-                opusFile = AudioOpusConverter.convert(mediaFile.absolutePath, 10_000_000L)
+                opusFile = AudioOpusConverter.convert(mediaFile.absolutePath, 10_000_000L, workDir)
                 if (opusFile != null && opusFile.exists() && opusFile.length() > 0) {
                     StickerBotConsole.emitFromXposed(
                         app,
@@ -579,24 +584,24 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 }
             }
 
-            // 1. Save into WhatsApp Starred Stickers (Favorites) when triggered by the user
-            val (savedFav, favStickerFile, plainHash) = if (fromMe) {
-                saveToWhatsAppStarredStickers(encoded.webpBytes)
-            } else {
-                val sha256 = MessageDigest.getInstance("SHA-256").digest(encoded.webpBytes)
-                val hash = Base64.encodeToString(sha256, Base64.NO_WRAP)
-                Triple(false, null, hash)
-            }
-            if (savedFav) {
-                StickerBotConsole.emitFromXposed(app, "Figurinha salva nos Favoritos do WhatsApp!")
-            }
-
-            val workDir = File(app.cacheDir, "sticker_bot").apply { mkdirs() }
-            val tempStickerFile = favStickerFile ?: File(
+            // Use a dedicated temp file in cacheDir so WhatsApp's sticker sender never truncates files/Stickers/<hash>.webp
+            val tempStickerFile = File(
                 workDir,
                 "sticker_${System.currentTimeMillis()}.webp"
             ).apply {
                 writeBytes(encoded.webpBytes)
+            }
+            val sha256 = MessageDigest.getInstance("SHA-256").digest(encoded.webpBytes)
+            val plainHash = Base64.encodeToString(sha256, Base64.NO_WRAP)
+
+            // 1. Save into WhatsApp Starred Stickers (Favorites) when triggered by the user
+            val (savedFav, _) = if (fromMe) {
+                saveToWhatsAppStarredStickers(encoded.webpBytes)
+            } else {
+                Triple(false, null, plainHash)
+            }
+            if (savedFav) {
+                StickerBotConsole.emitFromXposed(app, "Figurinha salva nos Favoritos do WhatsApp!")
             }
 
             // 2. Deliver sticker (+ Opus voice note if !som) silently in the background
@@ -609,6 +614,11 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
                 chatRowId = chatRowId,
                 db = db
             )
+
+            // Re-ensure files/Stickers/<hash>.webp is intact after WhatsApp's media sender finishes
+            if (fromMe) {
+                saveToWhatsAppStarredStickers(encoded.webpBytes)
+            }
 
             fMessage?.let { WppCore.sendReaction(if (withAudio) "🔊" else "✅", it.getObject()) }
             if (fromMe) {
@@ -1248,6 +1258,7 @@ class StickerBotFeature(classLoader: ClassLoader, preferences: SharedPreferences
         const val PREF_BOT_SELF_ONLY = "sticker_bot_self_only"
         const val PREF_BOT_ALLOW_PRIVATE = "sticker_bot_allow_private"
         const val PREF_BOT_ALLOW_GROUPS = "sticker_bot_allow_groups"
+        const val PREF_BOT_CONTEXT_SHORTCUT = "sticker_bot_context_shortcut"
         const val PREF_BOT_PACK = "sticker_bot_pack"
         const val PREF_BOT_AUTHOR = "sticker_bot_author"
 

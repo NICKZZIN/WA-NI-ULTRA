@@ -104,6 +104,20 @@
                         android:textAppearance="?textAppearanceBodySmall"
                         android:textColor="?colorOnSurfaceVariant" />
 
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switchContextMenuShortcut"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/spacing_small"
+                        android:text="@string/sticker_bot_context_shortcut" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sticker_bot_context_shortcut_sum"
+                        android:textAppearance="?textAppearanceBodySmall"
+                        android:textColor="?colorOnSurfaceVariant" />
+
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -221,7 +235,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/spacing_xs"
-                        android:checked="true"
+                        android:checked="false"
                         android:text="@string/sticker_bot_with_sound_toggle" />
 
                     <com.google.android.material.materialswitch.MaterialSwitch

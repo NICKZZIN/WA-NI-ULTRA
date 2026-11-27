@@ -80,6 +80,8 @@ class StickerBotActivity : BaseActivity() {
         binding.switchSelfOnly.isChecked = selfOnly
         binding.switchAllowPrivate.isChecked = !selfOnly && allowPrivate
         binding.switchAllowGroups.isChecked = !selfOnly && allowGroups
+        binding.switchContextMenuShortcut.isChecked =
+            prefs.getBoolean(StickerBotFeature.PREF_BOT_CONTEXT_SHORTCUT, true)
         binding.editPackName.setText(
             prefs.getString(StickerBotFeature.PREF_BOT_PACK, "WA-NI-ULTRA")
         )
@@ -166,6 +168,15 @@ class StickerBotActivity : BaseActivity() {
                 StickerBotConsole.append("Comandos de outras pessoas em grupos desativados.")
             }
             updatingSwitches = false
+            notifyPrefsUpdated()
+        }
+
+        binding.switchContextMenuShortcut.setOnCheckedChangeListener { _, checked ->
+            prefs.edit { putBoolean(StickerBotFeature.PREF_BOT_CONTEXT_SHORTCUT, checked) }
+            StickerBotConsole.append(
+                if (checked) "Botão 'Figurinha' ao segurar foto/vídeo no WhatsApp ATIVADO."
+                else "Botão 'Figurinha' ao segurar foto/vídeo no WhatsApp DESATIVADO (apenas comandos ativos)."
+            )
             notifyPrefsUpdated()
         }
 
@@ -267,8 +278,13 @@ class StickerBotActivity : BaseActivity() {
             var opusOut: File? = null
             try {
                 val mime = contentResolver.getType(uri).orEmpty().lowercase(Locale.ROOT)
-                val isVideo = mime.startsWith("video/") || mime == "image/gif"
-                val ext = if (isVideo) "mp4" else "jpg"
+                val isGif = mime == "image/gif"
+                val isVideo = mime.startsWith("video/") || isGif
+                val ext = when {
+                    isGif -> "gif"
+                    isVideo -> "mp4"
+                    else -> "jpg"
+                }
                 val workDir = File(cacheDir, "sticker_studio").apply { mkdirs() }
                 tempInput = File(workDir, "input_${System.currentTimeMillis()}.$ext")
 
@@ -276,7 +292,7 @@ class StickerBotActivity : BaseActivity() {
                     tempInput.outputStream().use { output -> input.copyTo(output) }
                 } ?: throw IllegalStateException("Não foi possível ler o arquivo selecionado.")
 
-                StickerBotConsole.append("Mídia carregada (${tempInput.length() / 1024} KB) — tipo: ${if (isVideo) "Vídeo/GIF" else "Imagem"}")
+                StickerBotConsole.append("Mídia carregada (${tempInput.length() / 1024} KB) — tipo: ${if (isGif) "GIF" else if (isVideo) "Vídeo" else "Imagem"}")
 
                 val encoded = if (isVideo) {
                     WebpStickerEncoder.createAnimatedSticker(tempInput, fullFrame, pack, author) {
@@ -296,9 +312,9 @@ class StickerBotActivity : BaseActivity() {
                 val outWebp = File(sharedDir, "figurinha_$ts.webp")
                 outWebp.writeBytes(encoded.webpBytes)
 
-                if (isVideo && withSound) {
+                if (isVideo && !isGif && withSound) {
                     StickerBotConsole.append("Convertendo áudio para Ogg/Opus 48kHz (máx 10s)...")
-                    val converted = AudioOpusConverter.convert(tempInput.absolutePath, 10_000_000L)
+                    val converted = AudioOpusConverter.convert(tempInput.absolutePath, 10_000_000L, workDir)
                     if (converted != null && converted.exists() && converted.length() > 0) {
                         val sharedOpus = File(sharedDir, "figurinha_som_$ts.opus")
                         converted.copyTo(sharedOpus, overwrite = true)

@@ -700,6 +700,11 @@
     <string name="sticker_bot_allow_private_sum">Contacts who send or reply to photos/videos with !s, !fig, !som or !ajuda in your private chat receive the sticker automatically in the background</string>
     <string name="sticker_bot_allow_groups">Allow other people to use the bot in groups</string>
     <string name="sticker_bot_allow_groups_sum">Allows group members to trigger !s, !fig, !som and !ajuda (keep off in large groups to avoid spam)</string>
+    <string name="sticker_bot_context_shortcut">Show "Figurinha" button when holding on a photo/video</string>
+    <string name="sticker_bot_context_shortcut_sum">Adds a quick shortcut to WhatsApp\'s message popup menu. Turn off if you prefer using only chat commands (!s, !fig, !som)</string>
+    <string name="restore_found_backup_title">Saved Configuration Found</string>
+    <string name="restore_found_backup_message">We found a saved default configuration backup on your device. Do you want to restore your settings now?</string>
+    <string name="restore_now">Restore</string>
     <string name="sticker_bot_pack_name">Sticker Pack Name</string>
     <string name="sticker_bot_pack_author">Sticker Author</string>
     <string name="sticker_bot_safety_title">Anti-Ban Guide &amp; Self-Chat Shortcut</string>

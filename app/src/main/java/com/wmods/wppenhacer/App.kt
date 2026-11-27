@@ -39,7 +39,6 @@ class App : ModuleApplication() {
 
         try {
             sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
-            ConfigBackupManager.restorePersistentDefaultIfNeeded(this, sharedPreferences)
             sharedPreferences.registerOnSharedPreferenceChangeListener(prefsChangeListener)
             RemotePreferencesSync(this).start()
             val mode = sharedPreferences.getString("thememode", "0")!!.toInt()

@@ -691,6 +691,11 @@
     <string name="sticker_bot_allow_private_sum">Contatos que enviarem foto/vídeo com !s, !fig, !som ou !ajuda no seu privado recebem a figurinha automaticamente em segundo plano</string>
     <string name="sticker_bot_allow_groups">Permitir que outras pessoas usem em grupos</string>
     <string name="sticker_bot_allow_groups_sum">Permite que membros de grupos usem !s, !fig, !som e !ajuda (desative em grupos grandes para evitar spam)</string>
+    <string name="sticker_bot_context_shortcut">Mostrar botão ao segurar na foto/vídeo no WhatsApp</string>
+    <string name="sticker_bot_context_shortcut_sum">Exibe o atalho "Figurinha" no menu ao segurar uma mídia na conversa. Desative para usar apenas comandos (!s, !fig, !som)</string>
+    <string name="restore_found_backup_title">Backup de Configuração Encontrado</string>
+    <string name="restore_found_backup_message">Foi encontrado um backup de configuração padrão salvo no seu aparelho. Deseja restaurar suas configurações agora?</string>
+    <string name="restore_now">Restaurar</string>
     <string name="sticker_bot_pack_name">Nome do Pacote da Figurinha</string>
     <string name="sticker_bot_pack_author">Autor da Figurinha</string>
     <string name="sticker_bot_safety_title">Guia Anti-Banimento e Atalho Pessoal</string>

@@ -41,9 +41,14 @@ object AudioOpusConverter {
 
     @JvmStatic
     @JvmOverloads
-    fun convert(filePath: String, maxDurationUs: Long = Long.MAX_VALUE): File? {
+    fun convert(
+        filePath: String,
+        maxDurationUs: Long = Long.MAX_VALUE,
+        outputDir: File? = null
+    ): File? {
+        val targetDir = outputDir?.apply { mkdirs() } ?: File(filePath).parentFile
         val outFile =
-            File(File(filePath).parentFile, "voice_note_${System.currentTimeMillis()}.opus")
+            File(targetDir, "voice_note_${System.currentTimeMillis()}.opus")
 
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
