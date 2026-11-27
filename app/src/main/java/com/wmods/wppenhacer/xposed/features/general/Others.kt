@@ -13,15 +13,20 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.isVisible
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
+import com.highcapable.yukihookapi.extension.kavaref.hookAll
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.listeners.OnMultiClickListener
 import com.wmods.wppenhacer.xposed.core.Feature
+import com.wmods.wppenhacer.xposed.core.ViewHookDispatcher
 import com.wmods.wppenhacer.xposed.core.FeatureLoader
 import com.wmods.wppenhacer.xposed.core.WppCore
 import com.wmods.wppenhacer.xposed.core.components.FMessageWpp
 import com.wmods.wppenhacer.xposed.core.components.SharedPreferencesWrapper
 import com.wmods.wppenhacer.xposed.core.components.WaContactWpp
 import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
+import com.wmods.wppenhacer.xposed.features.general.PropsHook.Companion.booleans
+import com.wmods.wppenhacer.xposed.features.general.PropsHook.Companion.integers
 import com.wmods.wppenhacer.xposed.features.listeners.ConversationItemListener
 import com.wmods.wppenhacer.xposed.utils.AnimationUtil
 import com.wmods.wppenhacer.xposed.utils.AudioOpusConverter
@@ -39,19 +44,9 @@ import java.util.Collections
 import java.util.Properties
 import java.util.WeakHashMap
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 
 class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(loader, preferences) {
-
-    companion object {
-
-        @JvmField
-        val propsBoolean = ConcurrentHashMap<Int, Boolean>()
-
-        @JvmField
-        val propsInteger = ConcurrentHashMap<Int, Int>()
-    }
 
     private lateinit var properties: Properties
     private val hiddenHomeFilterViews =
@@ -75,25 +70,33 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
         val audioTranscription = xprefs.getBoolean("audio_transcription", false)
         val oldStatus = xprefs.getBoolean("oldstatus", false)
         val igstatus = xprefs.getBoolean("igstatus", false)
+        val nativeIgStatus = xprefs.getBoolean("native_igstatus", false)
         val animationEmojis = xprefs.getBoolean("animation_emojis", false)
         val disableDocumentScanner = xprefs.getBoolean("disable_document_scanner", false)
         val disableProfileStatus = xprefs.getBoolean("disable_profile_status", false)
         val disableExpiration = xprefs.getBoolean("disable_expiration", false)
         val disableAd = xprefs.getBoolean("disable_ads", false)
 
-        propsInteger[3877] = if (oldStatus) (if (igstatus) 2 else 0) else 2
+        integers[3877] = if (oldStatus) (if (igstatus) 2 else 0) else 2
 
-        propsBoolean[18250] = false
-        propsBoolean[11528] = false
+        // WhatsApp's own status bar in the chats tab
+        booleans[25327] = igstatus && nativeIgStatus
 
-        propsBoolean[4497] = menuWIcons
-        propsBoolean[4023] = false
-        propsBoolean[16250] = false
+        booleans[18250] = false
+        // 11528 gates WhatsApp's "+" add custom list chip in the chat filter row.
+        // Only force it off when WAE hides the filter row (#838).
+        if (!filterSeen) booleans[11528] = false
+
+        booleans[4497] = menuWIcons
+        booleans[4023] = false
+        booleans[16250] = false
 
         if (newSettings == 2) {
-            WppCore.homeActivityClass.resolve().method {
+            WppCore.homeActivityClass.resolve().firstMethod {
                 name = "onCreateOptionsMenu"
-            }.hookAll {
+                superclass()
+                parameters(Menu::class.java)
+            }.hook {
                 after {
                     val menu = args[0] as Menu
                     val menuItem = menu.findItem(Utils.getID("me_tab_menu_item", "id"))
@@ -101,83 +104,88 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
                 }
             }
         }
-        propsBoolean[14862] = newSettings != 0 // WHATS_HAPPENING_SENDING_ENABLED_CODE
-        propsInteger[18564] = newSettings // ME_TAB_V2_VARIANTS_CODE
+        booleans[14862] = newSettings != 0 // WHATS_HAPPENING_SENDING_ENABLED_CODE
+        integers[18564] = newSettings // ME_TAB_V2_VARIANTS_CODE
 
-        propsBoolean[2889] = floatingMenu
+        booleans[2889] = floatingMenu
 
         // new text composer
-        propsBoolean[15708] = true
+        booleans[15708] = true
 
         // change page id
-        propsBoolean[2358] = false
+        booleans[2358] = false
 
         // disable contact filter
-        propsBoolean[7769] = false
+        booleans[7769] = false
 
         // disable new Media Picker
-        propsBoolean[9286] = false
+        booleans[9286] = false
 
         // Instant Video
-        propsBoolean[3354] = true
-        propsBoolean[5418] = true
-        propsBoolean[9051] = true
+        booleans[3354] = true
+        booleans[5418] = true
+        booleans[9051] = true
 
         // disable new toolbar
-        propsBoolean[11824] = false
-        propsBoolean[6481] = false
+        booleans[11824] = false
+        booleans[6481] = false
 
         // Enable music in Stories
-        propsBoolean[13591] = true
-        propsBoolean[10024] = true
+        booleans[13591] = true
+        booleans[10024] = true
 
         // show all status
-        propsBoolean[6798] = true
+        booleans[6798] = true
 
         // auto play emojis settings
-        propsBoolean[3575] = animationEmojis
-        propsBoolean[9757] = animationEmojis
+        booleans[3575] = animationEmojis
+        booleans[9757] = animationEmojis
 
         // emojis maps
-        propsBoolean[10639] = animationEmojis
-        propsBoolean[12495] = animationEmojis
-        propsBoolean[11066] = animationEmojis
+        booleans[10639] = animationEmojis
+        booleans[12495] = animationEmojis
+        booleans[11066] = animationEmojis
 
-        propsBoolean[7589] = true  // Media select quality
-        propsBoolean[6972] = false // Media select quality
-        propsBoolean[5625] = true  // Enable option to autodelete channels media
+        booleans[7589] = true  // Media select quality
+        booleans[6972] = false // Media select quality
+        booleans[5625] = true  // Enable option to autodelete channels media
 
-        propsBoolean[8643] = true  // Enable TextStatusComposerActivityV2
-//        propsBoolean[3403] = true  // Enable Sticker Suggestion
-        propsBoolean[8607] = true  // Enable Dialer keyboard
-        propsBoolean[9578] = true  // Enable Privacy Checkup
-        propsInteger[8135] = 2  // Call Filters
+        booleans[8643] = true  // Enable TextStatusComposerActivityV2
+//        booleans[3403] = true  // Enable Sticker Suggestion
+        booleans[8607] = true  // Enable Dialer keyboard
+        booleans[9578] = true  // Enable Privacy Checkup
+        integers[8135] = 2  // Call Filters
 
         // Enable Translate Message
-        propsBoolean[9141] = true
-        propsBoolean[8925] = true
+        booleans[9141] = true
+        booleans[8925] = true
 
-        propsBoolean[10380] = false // fix crash bug in Settings/Archived
+        booleans[10380] = false // fix crash bug in Settings/Archived
         if (disableDocumentScanner) {
-            propsBoolean[10048] = false // ML Kit document scanner in DocumentPicker
+            booleans[10048] = false // ML Kit document scanner in DocumentPicker
         }
 
-        propsBoolean[0x34b9] = true // Enable Select People in call
-        propsBoolean[0x351c] = true // Enable new colors style in Text Composer
+        booleans[0x34b9] = true // Enable Select People in call
+        booleans[0x351c] = true // Enable new colors style in Text Composer
 
         // Enable show count until viewed
-        propsBoolean[0x2289] = true
-        propsBoolean[0x373f] = true
+        booleans[0x2289] = true
+        booleans[0x373f] = true
 
         // add yours in stories
-        propsBoolean[0x2ce2] = true
-        propsBoolean[0x2ce3] = true
+        booleans[0x2ce2] = true
+        booleans[0x2ce3] = true
 
-        propsBoolean[0x345a] = true // new edit profile name
+        booleans[0x345a] = true // new edit profile name
 
         // new stories selection
-        propsBoolean[0x32ca] = true
-        propsBoolean[0x32cb] = true
+        booleans[0x32ca] = true
+        booleans[0x32cb] = true
+
+        // Send View Once Text
+        booleans[30762] = true
+        // Schedule Message Native
+        booleans[23845] = true
 
         if (disableMetaAI) {
             SharedPreferencesWrapper.addHook { key, value ->
@@ -187,22 +195,32 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
                 value
             }
 
-            propsInteger[15535] = 0
-            propsBoolean[8025] = false
-            propsBoolean[6251] = false
-            propsBoolean[8026] = false
-            propsBoolean[14886] = false
+            booleans[7413] = false
+            booleans[8025] = false
+            booleans[6251] = false
+            booleans[8026] = false
+            booleans[14886] = false
+            booleans[16358] = false
+            booleans[17382] = false
+            booleans[11827] = false
+            booleans[10034] = false
+            booleans[12048] = false
+            booleans[13054] = false
+            booleans[14210] = false
+            booleans[12595] = false
+            booleans[12597] = false
+            integers[15535] = 0
         }
 
         if (audioTranscription) {
-            propsBoolean[8632] = true
-            propsBoolean[2890] = true
-            propsBoolean[9215] = false
-            propsBoolean[9216] = true
-            propsBoolean[6808] = true
-            propsBoolean[10286] = true
-            propsBoolean[11596] = true
-            propsBoolean[13949] = true
+            booleans[8632] = true
+            booleans[2890] = true
+            booleans[9215] = false
+            booleans[9216] = true
+            booleans[6808] = true
+            booleans[10286] = true
+            booleans[11596] = true
+            booleans[13949] = true
         }
 
         // Whatsapp Status Style
@@ -211,19 +229,18 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
             replaceAny { statusStyle }
         }
         statusStyle = if (oldStatus) 0 else statusStyle
-        propsInteger[9973] = 1
-        propsBoolean[6285] = true
-        propsInteger[8522] = statusStyle
-        propsInteger[8521] = statusStyle
+        integers[9973] = 1
+        booleans[6285] = true
+        integers[8522] = statusStyle
+        integers[8521] = statusStyle
 
         // Status in Group
-        propsBoolean[13956] = true
-        propsBoolean[13957] = true
+        booleans[13956] = true
+        booleans[13957] = true
 
         // new popup menu in chat
-        propsBoolean[21541] = false
+        booleans[21541] = false
 
-        hookProps()
         hookSearchbar(filterChats)
 
         if (disableSensorProximity) {
@@ -256,8 +273,6 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
                 logDebug(e)
             }
         }
-
-        customPlayBackSpeed()
 
         showOnline(showOnline)
 
@@ -344,8 +359,8 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
     }
 
     private fun disableAds() {
-        propsBoolean[22904] = true
-        propsBoolean[14306] = false
+        booleans[22904] = true
+        booleans[14306] = false
         try {
             val loadAd = Unobfuscator.loadAdVerifyMethod(classLoader)
             loadAd.hook {
@@ -598,44 +613,6 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
         }
     }
 
-    private fun customPlayBackSpeed() {
-        val voicenoteSpeed = xprefs.getFloat("voicenote_speed", 2.0f)
-        val playBackSpeed = Unobfuscator.loadPlaybackSpeed(classLoader)
-
-        playBackSpeed.hook {
-            before {
-                val index = ReflectionUtils.findIndexOfType(args, Float::class.javaPrimitiveType!!)
-                if (index != -1) {
-                    if (args[index] as? Float == 2.0f) {
-                        args[index] = voicenoteSpeed
-                    }
-                }
-            }
-        }
-
-        val voicenoteClass = Unobfuscator.findFirstClassUsingName(
-            classLoader,
-            StringMatchType.EndsWith,
-            "VoiceNoteProfileAvatarView"
-        )
-        val method = ReflectionUtils.findAllMethodsUsingFilter(voicenoteClass) { method1 ->
-            method1.parameterCount == 4 && method1.parameterTypes[0] == Int::class.javaPrimitiveType && method1.returnType == Void.TYPE
-        }
-
-        method[method.size - 1].hook {
-            after {
-                if (args[0] as Int == 3) {
-                    val view = instance as View
-                    val playback =
-                        view.findViewById<TextView>(Utils.getID("fast_playback_overlay", "id"))
-                    if (playback != null) {
-                        playback.text = voicenoteSpeed.toString().replace(".", ",") + "×"
-                    }
-                }
-            }
-        }
-    }
-
     private fun sendAudioType(selectedAudioType: Int) {
         val sendAudioTypeMethod = Unobfuscator.loadMediaTypeMethod(classLoader)
 
@@ -727,18 +704,19 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
                 it > 0
             }.toSet()
         }
-        View::class.java.resolve().firstMethod {
-            name = "invalidate"
-            superclass()
-            parameters(Boolean::class)
-        }.hook {
-            after {
-                val view = instance as View
-                val id = view.id
-                if (id > 0 && idsFilter.contains(id) && view.isVisible) {
-                    view.visibility = View.GONE
-                }
+        ViewHookDispatcher.onAttachedToWindow(this) { view ->
+            val id = view.id
+            if (id > 0 && idsFilter.contains(id) && view.isVisible) {
+                view.visibility = View.GONE
             }
+        }
+
+        val visibilityMask = 0x0000000C
+        ViewHookDispatcher.onSetFlags(this) { view, flags, mask ->
+            if ((mask and visibilityMask) == 0) return@onSetFlags flags
+            val id = view.id
+            if (id <= 0 || !idsFilter.contains(id)) return@onSetFlags flags
+            (flags and visibilityMask.inv()) or View.GONE
         }
     }
 
@@ -763,39 +741,6 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
                         ), Toast.LENGTH_SHORT
                     )
                 Tasker.sendTaskerEvent(name, WppCore.stripJID(jid), "contact_online")
-            }
-        }
-    }
-
-    private fun hookProps() {
-        val methodPropsBoolean = Unobfuscator.loadPropsBooleanMethod(classLoader)
-        logDebug(Unobfuscator.getMethodDescriptor(methodPropsBoolean))
-        val dataUsageActivityClass = WppCore.dataUsageActivityClass
-
-        methodPropsBoolean.hook {
-            after {
-                val list = ReflectionUtils.findInstancesOfType(args, Integer::class.java)
-                val i = list[0].second.toInt()
-
-                val propValue = propsBoolean[i]
-                if (propValue != null) {
-                    // Fix Bug in Settings Data Usage
-                    if (i == 4023) {
-                        if (ReflectionUtils.isCalledFromClass(dataUsageActivityClass)) return@after
-                    }
-                    result = propValue
-                }
-            }
-        }
-
-        val methodPropsInteger = Unobfuscator.loadPropsIntegerMethod(classLoader)
-
-        methodPropsInteger.hook {
-            before {
-                val list = ReflectionUtils.findInstancesOfType(args, Integer::class.java)
-                val i = list[0].second.toInt()
-                val propValue = propsInteger[i] ?: return@before
-                result = propValue
             }
         }
     }

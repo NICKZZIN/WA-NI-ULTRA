@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.MenuItem
 import android.widget.BaseAdapter
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.core.components.FMessageWpp
 import com.wmods.wppenhacer.xposed.core.components.WaContactWpp
@@ -87,11 +88,7 @@ class SeparateGroup(loader: ClassLoader, preferences: SharedPreferences) :
     }
 
     override fun doHook() {
-        val bottomNavigationViewCls = Unobfuscator.findFirstClassUsingName(
-            classLoader,
-            StringMatchType.EndsWith,
-            ".BottomNavigationView"
-        )
+        val bottomNavigationViewCls = Unobfuscator.loadBottomNavigationViewClass(classLoader)
         bottomNavigationViewCls.resolve().firstMethod {
             name = "getMaxItemCount"
             superclass()
@@ -101,9 +98,6 @@ class SeparateGroup(loader: ClassLoader, preferences: SharedPreferences) :
         }
 
         if (!xprefs.getBoolean("separategroups", false)) return
-
-        // Modifying tab list order
-        hookTabList()
 
         // Setting group icon
         hookTabIcon()
@@ -116,6 +110,9 @@ class SeparateGroup(loader: ClassLoader, preferences: SharedPreferences) :
 
         // Setting tab count
         hookTabCount()
+
+        // Modifying tab list order
+        hookTabList()
     }
 
     override fun getPluginName(): String {
@@ -341,6 +338,10 @@ class SeparateGroup(loader: ClassLoader, preferences: SharedPreferences) :
         publishResultsMethod.hook {
             before {
                 val filters = args[1]
+                if (filters?.javaClass == publishResultsMethod.parameterTypes[1]) {
+                    result = null
+                    return@before
+                }
                 val chatsList = ReflectionUtils.getObjectField(filters, "values") as List<*>
                 val baseField = ReflectionUtils.getFieldByExtendType(
                     publishResultsMethod.declaringClass,

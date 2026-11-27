@@ -1,39 +1,75 @@
 package com.wmods.wppenhacer.xposed.bridge
 
+import android.content.ContentProvider
 import android.content.Context
+import android.content.pm.ProviderInfo
 import android.os.Binder
 import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import androidx.core.net.toUri
 import com.highcapable.kavaref.KavaRef.Companion.resolve
-import com.highcapable.yukihookapi.hook.core.YukiMemberHookCreator
+import com.highcapable.yukihookapi.extension.kavaref.hook
+import com.highcapable.yukihookapi.extension.kavaref.hookAll
+import com.highcapable.yukihookapi.extension.kavaref.toClass
 import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
 import com.highcapable.yukihookapi.hook.log.YLog
 import com.wmods.wppenhacer.BuildConfig
+import com.wmods.wppenhacer.provider.PrefsProvider
 import com.wmods.wppenhacer.xposed.core.FeatureLoader
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
 import com.wmods.wppenhacer.xposed.utils.Utils
+import java.lang.reflect.Field
+import java.lang.reflect.Method
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 object ScopeHook : YukiBaseHooker() {
 
+    private const val SETTINGS_PROVIDER_CLASS = "com.android.providers.settings.SettingsProvider"
+
     private val pmsRef = AtomicReference<Any?>(null)
-    private var scopeHookResult: YukiMemberHookCreator.MemberHookCreator.Result? = null
+    private val settingsHooked = AtomicBoolean(false)
+    private val packageNameAccessors = ConcurrentHashMap<Class<*>, (Any) -> String?>()
+
+    @Volatile
+    private var getPackagesForUidMethod: Method? = null
+
+    @Volatile
+    private var scopeErrorLogged = false
 
     override fun onHook() {
         when (packageName) {
-            "android" if processName == "android" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+            // libxposed reports system_server as "system"
+            "android", "system" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 hookService()
                 hookScope()
+                hookSettings()
             }
-
-            "com.android.providers.settings" -> hookSettings()
         }
     }
 
     private fun hookSettings() {
         runCatching {
-            "com.android.providers.settings.SettingsProvider".toClass().resolve()
+            ContentProvider::class.java.resolve()
+                .firstMethod {
+                    name = "attachInfo"
+                    parameters(Context::class.java, ProviderInfo::class.java)
+                }.hook {
+                    after {
+                        val providerClass = instance.javaClass
+                        if (providerClass.name != SETTINGS_PROVIDER_CLASS) return@after
+                        if (!settingsHooked.compareAndSet(false, true)) return@after
+                        hookSettingsProvider(providerClass)
+                    }
+                }
+        }.onFailure { YLog.error(e = it) }
+    }
+
+    private fun hookSettingsProvider(providerClass: Class<*>) {
+        runCatching {
+            providerClass.resolve()
                 .firstMethod {
                     name = "call"
                     parameters(String::class.java, String::class.java, Bundle::class.java)
@@ -42,10 +78,14 @@ object ScopeHook : YukiBaseHooker() {
                         try {
                             val method = args[0] as? String ?: return@before
                             val arg = args[1] as? String ?: return@before
-                            if (method != "WaEnhancer" || arg != "getHookBinder") return@before
+                            if (method != "WaEnhancer") return@before
+                            val (authority, providerMethod) = when (arg) {
+                                "getHookBinder" -> "hookprovider" to "getHookBinder"
+                                "getPrefs" -> "preferences" to PrefsProvider.METHOD_GET_ALL
+                                else -> return@before
+                            }
 
-                            val ctx = instance.javaClass.getMethod("getContext")
-                                .invoke(instance) as? Context ?: return@before
+                            val ctx = instance<ContentProvider>().context ?: return@before
                             YLog.debug(msg = "Wa Enhancer: Trying to allow blocking")
                             runCatching {
                                 Binder::class.java.getMethod("allowBlockingForCurrentThread")
@@ -53,8 +93,8 @@ object ScopeHook : YukiBaseHooker() {
                             }
                             result = Utils.binderLocalScope<Bundle?> {
                                 val uri =
-                                    "content://${BuildConfig.APPLICATION_ID}.hookprovider".toUri()
-                                ctx.contentResolver.call(uri, "getHookBinder", null, null)
+                                    "content://${BuildConfig.APPLICATION_ID}.$authority".toUri()
+                                ctx.contentResolver.call(uri, providerMethod, null, null)
                             }
                             runCatching {
                                 Binder::class.java.getMethod("defaultBlockingForCurrentThread")
@@ -66,7 +106,11 @@ object ScopeHook : YukiBaseHooker() {
                         }
                     }
                 }
-        }.onFailure { YLog.error(e = it) }
+            YLog.debug(msg = "Hooked SettingsProvider call in Android System")
+        }.onFailure {
+            settingsHooked.set(false)
+            YLog.error(e = it)
+        }
     }
 
     private fun hookService() {
@@ -84,91 +128,107 @@ object ScopeHook : YukiBaseHooker() {
         }.onFailure { YLog.error(e = it) }
     }
 
-    private fun isWppCaller(callingApps: Array<String>, targetApp: String) =
-        targetApp == BuildConfig.APPLICATION_ID && callingApps.any {
-            it == FeatureLoader.PACKAGE_WPP || it == FeatureLoader.PACKAGE_BUSINESS
-        }
-
     private fun hookScope() {
-        runCatching {
-            scopeHookResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                "com.android.server.pm.AppsFilterBase".toClass().resolve()
-                    .method { name = "shouldFilterApplication" }
-                    .hookAll {
-                        before {
-                            try {
-                                val snapshot = args[0]
-                                val callingUid = args[1] as Int
-                                if (callingUid == 1000) return@before
-                                @Suppress("UNCHECKED_CAST")
-                                val callingApps = Utils.binderLocalScope<Array<String>?> {
-                                    val computerClass = "com.android.server.pm.Computer".toClass()
-                                    val getPackagesForUid =
-                                        ReflectionUtils.findMethodUsingFilter(computerClass) { it.name == "getPackagesForUid" }
-                                    ReflectionUtils.callMethod(
-                                        getPackagesForUid,
-                                        snapshot,
-                                        callingUid
-                                    ) as? Array<String>
-                                } ?: return@before
-                                if (isWppCaller(
-                                        callingApps,
-                                        getPackageNameFromPackageSettings(args[3])
-                                    )
-                                ) {
-                                    result = false
-                                }
-                            } catch (e: Exception) {
+        // OEMs may override shouldFilterApplication in AppsFilterImpl on API 33+
+        // Thanks to frknkrc44
+        val classNames = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            listOf("com.android.server.pm.AppsFilterBase", "com.android.server.pm.AppsFilterImpl")
+        } else {
+            listOf("com.android.server.pm.AppsFilter")
+        }
+        var hooked = 0
+        for (className in classNames) {
+            runCatching {
+                val clazz = className.toClass()
+                if (clazz.declaredMethods.none { it.name == "shouldFilterApplication" }) return@runCatching
+                val methods = clazz.resolve().method { name = "shouldFilterApplication" }
+                methods.hookAll {
+                    before {
+                        try {
+                            if (shouldAllowVisibility(args)) result = false
+                        } catch (e: Throwable) {
+                            if (!scopeErrorLogged) {
+                                scopeErrorLogged = true
                                 YLog.error(msg = "Error while hooking Android System", e = e)
-                                unhook()
                             }
                         }
                     }
-            } else {
-                "com.android.server.pm.AppsFilter".toClass().resolve()
-                    .method { name = "shouldFilterApplication" }
-                    .hookAll {
-                        before {
-                            try {
-                                val pms = pmsRef.get() ?: return@before
-                                val callingUid = args[0] as Int
-                                if (callingUid == 1000) return@before
-                                @Suppress("UNCHECKED_CAST")
-                                val callingApps = Utils.binderLocalScope<Array<String>?> {
-                                    val getPackagesForUid =
-                                        ReflectionUtils.findMethodUsingFilter(pms.javaClass) { it.name == "getPackagesForUid" }
-                                    ReflectionUtils.callMethod(
-                                        getPackagesForUid,
-                                        pms,
-                                        callingUid
-                                    ) as? Array<String>
-                                } ?: return@before
-                                if (isWppCaller(
-                                        callingApps,
-                                        getPackageNameFromPackageSettings(args[2])
-                                    )
-                                ) {
-                                    result = false
-                                }
-                            } catch (e: Exception) {
-                                YLog.error(msg = "Error while hooking Android System", e = e)
-                                unhook()
-                            }
-                        }
-                    }
+                }
+                hooked += methods.size
+            }.onFailure { YLog.debug(msg = "Scope hook not applied on $className: ${it.message}") }
+        }
+        if (hooked > 0) {
+            YLog.debug(msg = "Hooked visibility Scope in Android System ($hooked methods)")
+        } else {
+            YLog.error(msg = "Unable to hook visibility Scope in Android System")
+        }
+    }
+
+    private fun shouldAllowVisibility(args: Array<Any?>): Boolean {
+        if (args.size < 4) return false
+        val targetApp = getPackageNameFromPackageSettings(args[args.size - 2])
+        if (targetApp != BuildConfig.APPLICATION_ID) return false
+
+        val tiramisu = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        val callingUid = (if (tiramisu) args[1] else args[0]) as? Int ?: return false
+        if (callingUid == Process.SYSTEM_UID) return false
+
+        val callingApps = getPackagesForUid(if (tiramisu) args[0] else pmsRef.get(), callingUid)
+            ?: return false
+        return callingApps.any { it == FeatureLoader.PACKAGE_WPP || it == FeatureLoader.PACKAGE_BUSINESS }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun getPackagesForUid(computer: Any?, uid: Int): Array<String>? {
+        if (computer == null) return null
+        return Utils.binderLocalScope {
+            val method = getPackagesForUidMethod
+                ?.takeIf { it.declaringClass.isInstance(computer) }
+                ?: ReflectionUtils.findMethodUsingFilter(computer.javaClass) {
+                    it.name == "getPackagesForUid" && it.parameterTypes.contentEquals(arrayOf(Int::class.java))
+                }.also { getPackagesForUidMethod = it }
+            ReflectionUtils.callMethod(method, computer, uid) as? Array<String>
+        }
+    }
+
+    private fun getPackageNameFromPackageSettings(packageSettings: Any?): String? {
+        if (packageSettings == null) return null
+        val accessor = packageNameAccessors.getOrPut(packageSettings.javaClass) {
+            resolvePackageNameAccessor(packageSettings.javaClass)
+        }
+        return runCatching { accessor(packageSettings) }.getOrNull()
+    }
+
+    private fun resolvePackageNameAccessor(clazz: Class<*>): (Any) -> String? {
+        runCatching { clazz.getMethod("getPackageName") }.getOrNull()?.let { method ->
+            method.isAccessible = true
+            return { method.invoke(it) as? String }
+        }
+        for (fieldName in arrayOf("name", "mName")) {
+            findFieldOrNull(clazz, fieldName)?.takeIf { it.type == String::class.java }?.let { field ->
+                return { field.get(it) as? String }
             }
-            YLog.debug(msg = "Hooked visibility Scope in Android System")
-        }.onFailure { YLog.error(e = it) }
+        }
+        return ::parsePackageNameFromString
     }
 
-    private fun unhook() {
-        scopeHookResult?.remove()
+    private fun findFieldOrNull(clazz: Class<*>, fieldName: String): Field? {
+        var current: Class<*>? = clazz
+        while (current != null) {
+            current.declaredFields.firstOrNull { it.name == fieldName }?.let {
+                it.isAccessible = true
+                return it
+            }
+            current = current.superclass
+        }
+        return null
     }
 
-    private fun getPackageNameFromPackageSettings(packageSettings: Any?): String {
+    private fun parsePackageNameFromString(packageSettings: Any): String? {
         val str = packageSettings.toString()
         val startIndex = str.lastIndexOf(' ') + 1
         val endIndex = str.lastIndexOf('/')
+        if (endIndex < startIndex) return null
         return str.substring(startIndex, endIndex)
     }
 }

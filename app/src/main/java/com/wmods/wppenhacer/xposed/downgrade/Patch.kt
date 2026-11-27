@@ -2,6 +2,9 @@ package com.wmods.wppenhacer.xposed.downgrade
 
 import android.os.Build
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
+import com.highcapable.yukihookapi.extension.kavaref.hookAll
+import com.highcapable.yukihookapi.extension.kavaref.toClassOrNull
 import com.highcapable.yukihookapi.hook.entity.YukiBaseHooker
 import com.highcapable.yukihookapi.hook.log.YLog
 import com.wmods.wppenhacer.xposed.core.FeatureLoader
@@ -127,9 +130,9 @@ object Patch : YukiBaseHooker() {
             }
         }
 
-        // Flyme 9 (Android 11) specific overload.
+        // Flyme 9 (Android 11) specific overload, absent on every other ROM.
         runCatching {
-            pmClass.resolve().firstMethodOrNull {
+            pmClass.resolve().optional(silent = true).firstMethodOrNull {
                 name = "checkDowngrade"
                 parameters(liteClass, liteClass)
             }?.hook {

@@ -82,6 +82,11 @@
             app:title="@string/hidereceipt" />
 
         <rikka.material.preference.MaterialSwitchPreference
+            app:key="hidereceipt_unknown"
+            app:summary="@string/hide_delivered_unknown_sum"
+            app:title="@string/hide_delivered_unknown" />
+
+        <rikka.material.preference.MaterialSwitchPreference
             app:key="ghostmode_t"
             app:summary="@string/ghostmode_sum"
             app:title="@string/ghostmode" />
@@ -146,6 +151,12 @@
             app:key="call_type"
             app:summary="@string/call_blocking_type_sum"
             app:title="@string/call_blocking_type" />
+
+        <rikka.material.preference.MaterialSwitchPreference
+            app:defaultValue="true"
+            app:key="call_block_notification_enabled"
+            app:summary="@string/call_block_notification_enabled_sum"
+            app:title="@string/call_block_notification_enabled" />
 
         <com.wmods.wppenhacer.preference.ContactPickerPreference
             android:key="call_block_contacts"

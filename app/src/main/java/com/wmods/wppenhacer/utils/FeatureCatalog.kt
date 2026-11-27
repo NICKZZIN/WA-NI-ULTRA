@@ -88,9 +88,9 @@ object FeatureCatalog {
             general, "general_home", "version", "check", "bypass"
         )
         add(
-            catalog, context, "bootloader_spoofer", R.string.bootloader_spoofer,
+            catalog, context, "bootloader_spoofer_custom", R.string.custom_keybox,
             R.string.bootloader_spoofer_sum, SearchableFeature.Category.GENERAL_HOME,
-            general, "general_home", "bootloader", "spoofer", "ban"
+            general, "general_home", "keybox", "bootloader", "spoofer", "ban"
         )
         add(
             catalog,
@@ -457,6 +457,11 @@ object FeatureCatalog {
             "alert"
         )
         add(
+            catalog, context, "restore_stickers", R.string.restore_stickers,
+            R.string.restore_stickers_sum, SearchableFeature.Category.GENERAL_CONVERSATION,
+            general, "conversation", "sticker", "restore", "favorites", "root"
+        )
+        add(
             catalog, context, "calltype", R.string.selection_of_call_type,
             R.string.selection_of_call_type_sum, SearchableFeature.Category.GENERAL_CONVERSATION,
             general, "conversation", "call", "type", "selection", "phone"
@@ -515,6 +520,11 @@ object FeatureCatalog {
             catalog, context, "toast_viewed_status", R.string.toast_on_viewed_status,
             R.string.toast_on_viewed_status_sum, SearchableFeature.Category.GENERAL, general,
             null, "toast", "viewed", "status", "notification"
+        )
+        add(
+            catalog, context, "status_expiration_time", R.string.status_expiration_time,
+            R.string.status_expiration_time_sum, SearchableFeature.Category.GENERAL, general,
+            null, "status", "expiration", "time", "expires"
         )
 
         addPrivacyFeatures(context, catalog, privacy)
@@ -642,6 +652,21 @@ object FeatureCatalog {
             category, fragment, null, "hide", "delivered", "receipt"
         )
         add(
+            catalog,
+            context,
+            "hidereceipt_unknown",
+            R.string.hide_delivered_unknown,
+            R.string.hide_delivered_unknown_sum,
+            category,
+            fragment,
+            null,
+            "hide",
+            "delivered",
+            "receipt",
+            "unknown",
+            "contact"
+        )
+        add(
             catalog, context, "ghostmode_t", R.string.ghostmode, R.string.ghostmode_sum,
             category, fragment, null, "ghost", "typing", "hide"
         )
@@ -728,6 +753,19 @@ object FeatureCatalog {
             "blocking",
             "type"
         )
+        add(
+            catalog,
+            context,
+            "call_block_notification_enabled",
+            R.string.call_block_notification_enabled,
+            R.string.call_block_notification_enabled_sum,
+            category,
+            fragment,
+            null,
+            "call",
+            "blocked",
+            "notification"
+        )
     }
 
     private fun addMediaFeatures(
@@ -760,6 +798,11 @@ object FeatureCatalog {
             "download",
             "view",
             "once"
+        )
+        add(
+            catalog, context, "downloadvideonote", R.string.downloadvideonote,
+            R.string.downloadvideonote_sum, category, fragment, null,
+            "download", "video", "note"
         )
         add(
             catalog, context, "video_limit_size", R.string.increase_video_size_limit, null,
@@ -850,6 +893,21 @@ object FeatureCatalog {
         add(
             catalog, context, "voicenote_speed", R.string.voice_note_speed, null,
             category, fragment, null, "voice", "note", "speed"
+        )
+        add(
+            catalog, context, "audio_speed_control", R.string.audio_speed_control,
+            R.string.audio_speed_control_sum, category, fragment, null,
+            "audio", "voice", "speed", "slider"
+        )
+        add(
+            catalog, context, "voice_note_high_quality", R.string.voice_note_high_quality,
+            R.string.voice_note_high_quality_sum, category, fragment, null,
+            "voice", "note", "quality", "audio"
+        )
+        add(
+            catalog, context, "voice_note_noise_level", R.string.voice_note_noise_suppression,
+            R.string.voice_note_noise_suppression_sum, category, fragment, null,
+            "voice", "note", "noise", "suppression"
         )
         add(
             catalog,
@@ -1007,6 +1065,11 @@ object FeatureCatalog {
             category, fragment, null, "menu", "icons"
         )
         add(
+            catalog, context, "native_floating_navigation", R.string.native_floating_navigation,
+            R.string.native_floating_navigation_sum, category, fragment, null,
+            "navigation", "bottom", "bar", "floating", "native"
+        )
+        add(
             catalog, context, "novaconfig", R.string.novaconfig, R.string.novaconfig_sum,
             category, fragment, null, "settings", "style", "profile"
         )
@@ -1022,6 +1085,20 @@ object FeatureCatalog {
             "instagram",
             "status",
             "ig"
+        )
+        add(
+            catalog,
+            context,
+            "native_igstatus",
+            R.string.native_igstatus,
+            R.string.native_igstatus_sum,
+            category,
+            fragment,
+            "igstatus",
+            "instagram",
+            "status",
+            "ig",
+            "native"
         )
         add(
             catalog, context, "channels", R.string.disable_channels, R.string.disable_channels_sum,

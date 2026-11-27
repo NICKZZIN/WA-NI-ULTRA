@@ -1,6 +1,7 @@
 package com.wmods.wppenhacer.xposed.features.customization
 
 import android.Manifest
+import android.R as AndroidR
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.SharedPreferences
@@ -15,20 +16,25 @@ import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
+import android.view.Window
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.toDrawable
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
+import com.highcapable.yukihookapi.extension.kavaref.hookAll
 import com.wmods.wppenhacer.utils.ColorReplacement.replaceColors
 import com.wmods.wppenhacer.utils.DrawableColors.replaceColor
 import com.wmods.wppenhacer.utils.IColors
 import com.wmods.wppenhacer.views.WallpaperView
 import com.wmods.wppenhacer.xposed.core.Feature
+import com.wmods.wppenhacer.xposed.core.ViewHookDispatcher
 import com.wmods.wppenhacer.xposed.core.WppCore
 import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
 import com.wmods.wppenhacer.xposed.utils.DesignUtils
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
 import com.wmods.wppenhacer.xposed.utils.Utils
+import java.lang.ref.WeakReference
 import java.util.Collections
 import java.util.Properties
 import java.util.WeakHashMap
@@ -39,9 +45,46 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
     Feature(loader, preferences) {
 
     companion object {
+        private val SYSTEM_BAR_BACKGROUNDS =
+            intArrayOf(AndroidR.id.statusBarBackground, AndroidR.id.navigationBarBackground)
         private const val FIELD_WALLPAPER_TOOLBAR = "wae_wallpaper_toolbar"
+        private const val CONVERSATION_ALLOWED_COLOR = 0xff12181c.toInt()
+        private const val ACCENT_MIN_LIGHTNESS = 0.30f
+        private const val ACCENT_MAX_LIGHTNESS = 0.52f
 
         @JvmStatic
+        private fun processPrimaryColors(color: String, mapColors: HashMap<String, String>) {
+            val primary = runCatching { IColors.parseColor(color) }.getOrNull() ?: return
+            val primaryHsl = FloatArray(3).also { ColorUtils.colorToHSL(primary, it) }
+
+            for (key in mapColors.keys.toList()) {
+                val normalizedKey = when {
+                    key.length == 9 && key.startsWith("#") -> key
+                    key.length == 7 && key.startsWith("#") -> "#ff" + key.substring(1)
+                    key.length == 6 -> "#ff$key"
+                    else -> continue
+                }
+                val original = runCatching { IColors.parseColor(normalizedKey) }.getOrNull() ?: continue
+                val originalHsl = FloatArray(3).also { ColorUtils.colorToHSL(original, it) }
+                val lightness = originalHsl[2]
+                val rgb = if (lightness in ACCENT_MIN_LIGHTNESS..ACCENT_MAX_LIGHTNESS) {
+                    primary
+                } else {
+                    ColorUtils.HSLToColor(floatArrayOf(primaryHsl[0], primaryHsl[1], lightness))
+                }
+                val value = mapColors[key]
+                val alpha = if (value != null && value.length == 9) {
+                    value.substring(1, 3).toIntOrNull(16) ?: 0xff
+                } else 0xff
+                val replaced = ColorUtils.setAlphaComponent(rgb, alpha)
+                mapColors[key] = if (key.length == 6) {
+                    String.format("%06x", replaced and 0xffffff)
+                } else {
+                    IColors.toString(replaced)
+                }
+            }
+        }
+
         private fun processColors(color: String, mapColors: HashMap<String, String>) {
             val inputColorFull: String = when (color.length) {
                 7 -> {
@@ -107,6 +150,9 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
     private var toolbarAlpha: HashMap<String, String>? = null
     private var properties: Properties? = null
     private val resolvedColors = ConcurrentHashMap<Int, Int>()
+
+    @Volatile
+    private var conversationCheck: ConversationCheck? = null
     private val processedResources = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
 
     @Volatile
@@ -116,6 +162,7 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
     override fun doHook() {
         properties = Utils.getProperties(xprefs, "custom_css", "custom_filters")
         hookTheme()
+        hookThemeSchemes()
         hookWallpaper()
         ReflectionUtils.findClass("android.app.ActivityThread", classLoader).resolve().method {
             name = "handleRelaunchActivity"
@@ -126,6 +173,26 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
             }
         }
     }
+
+    private fun hookThemeSchemes() {
+        val selectedScheme = runCatching {
+            Unobfuscator.loadSelectedThemeSchemeMethod(classLoader)
+        }.onFailure { logDebug("Theme schemes not found", it) }.getOrNull() ?: return
+        val defaultScheme = Unobfuscator.loadDefaultThemeSchemeField(classLoader)
+            .apply { isAccessible = true }
+
+        selectedScheme.hook {
+            before {
+                if (!isCustomColorsEnabled()) return@before
+                val default = defaultScheme.get(args[0]) ?: return@before
+                result = default
+            }
+        }
+    }
+
+    private fun isCustomColorsEnabled(): Boolean =
+        xprefs.getBoolean("changecolor", false) ||
+                properties?.getProperty("change_colors") == "true"
 
     private fun loadAndApplyColorsWallpaper() {
         val customWallpaper = xprefs.getBoolean("wallpaper", false)
@@ -155,6 +222,7 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
         if (!xprefs.getBoolean("wallpaper", false)) return
 
         loadAndApplyColorsWallpaper()
+        WallpaperView.prefetch(Utils.application, xprefs, properties!!)
         val homeActivityClass = WppCore.homeActivityClass
         val actionModeBarId = Utils.getID("action_mode_bar", "id")
 
@@ -174,23 +242,22 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
                         Manifest.permission.READ_EXTERNAL_STORAGE
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
-                    injectWallpaper(activity.findViewById(Utils.getID("root_view", "id")))
+                    val rootView = activity.findViewById<View>(Utils.getID("root_view", "id"))
+                    injectWallpaper(rootView)
+                    keepSystemBarsRedrawn(activity.window, rootView)
                 }
             }
         }
 
-        View::class.java.resolve().firstMethod {
-            name = "onAttachedToWindow"
-            superclass()
-            emptyParameters()
-        }.hook {
-            after {
-                val view = instance as View
-                if (actionModeBarId > 0 && view.id == actionModeBarId)
-                    view.background = DesignUtils.getPrimarySurfaceColor().toDrawable()
-            }
+        ViewHookDispatcher.onAttachedToWindow(this) { view ->
+            if (actionModeBarId > 0 && view.id == actionModeBarId)
+                view.background = DesignUtils.getPrimarySurfaceColor().toDrawable()
         }
 
+        val toolbarIds = setOf(
+            Utils.getID("toolbar", "id"),
+            Utils.getID("toolbar_container", "id")
+        ).filter { it > 0 }.toIntArray()
         View::class.java.resolve().firstMethod {
             name = "setBackgroundColor"
             superclass()
@@ -198,6 +265,7 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
         }.hook {
             before {
                 val colors = toolbarAlpha ?: return@before
+                if ((instance as View).id !in toolbarIds) return@before
                 if (ReflectionUtils.getAdditionalInstanceField(
                         instance,
                         FIELD_WALLPAPER_TOOLBAR
@@ -223,19 +291,12 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
         }
 
         val loadTabFrameClass = Unobfuscator.loadTabFrameClass(classLoader)
-        FrameLayout::class.java.resolve().firstMethod {
-            name = "onMeasure"
-            superclass()
-            parameters(Int::class, Int::class)
-        }.hook {
-            after {
-                if (!loadTabFrameClass.isInstance(instance)) return@after
-                if (!colorsReady || checkNotHomeActivity()) return@after
-                val viewGroup = instance as ViewGroup
-                val background = viewGroup.background
-                val colors = navAlpha ?: return@after
-                replaceColor(background, colors)
-            }
+        ViewHookDispatcher.onFrameLayoutMeasured(this) { viewGroup ->
+            if (!loadTabFrameClass.isInstance(viewGroup)) return@onFrameLayoutMeasured
+            if (!colorsReady || checkNotHomeActivity()) return@onFrameLayoutMeasured
+            val background = viewGroup.background
+            val colors = navAlpha ?: return@onFrameLayoutMeasured
+            replaceColor(background, colors, true)
         }
     }
 
@@ -254,7 +315,7 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
                 ) {
                     if (typedValue.data == 0) return@after
                     val originalColor = typedValue.data
-                    val mappedColor = IColors.getFromIntColor(originalColor, IColors.colors)
+                    val mappedColor = mapColor(originalColor)
                     if (mappedColor == originalColor || checkNotApplyColor(originalColor)) return@after
                     typedValue.data = mappedColor
                 }
@@ -264,8 +325,9 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
         val resourceImpl =
             ReflectionUtils.findClass("android.content.res.ResourcesImpl", classLoader)
 
-        resourceImpl.resolve().method {
+        resourceImpl.resolve().optional().method {
             name = "loadDrawable"
+            superclass()
         }.hookAll {
             after {
                 if (!colorsReady) return@after
@@ -285,7 +347,7 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
                 val mColors =
                     ReflectionUtils.getObjectField(colorStateList, "mColors") as IntArray
                 for (i in mColors.indices) {
-                    mColors[i] = IColors.getFromIntColor(mColors[i], IColors.colors)
+                    mColors[i] = mapColor(mColors[i])
                 }
             }
         }
@@ -297,14 +359,9 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
             before {
                 if (!colorsReady) return@before
                 val currentActivity = WppCore.getCurrentActivity()
-                if (currentActivity == null || currentActivity.javaClass.simpleName == "Conversation") return@before
+                if (currentActivity == null || isConversation(currentActivity)) return@before
 
-                val color = args[0] as Int
-                val mappedColor = resolvedColors[color]
-                    ?: IColors.getFromIntColor(color, IColors.colors).also {
-                        resolvedColors[color] = it
-                    }
-                args[0] = mappedColor
+                args[0] = mapColor(args[0] as Int)
             }
         }
     }
@@ -361,7 +418,7 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
 
         if (changeColorEnabled || properties?.getProperty("change_colors") == "true") {
             if (primaryColor != "0" && DesignUtils.isValidColor(primaryColor)) {
-                processColors(primaryColor, IColors.primaryColors)
+                processPrimaryColors(primaryColor, IColors.primaryColors)
                 processColors(primaryColor, IColors.alphacolors)
             }
 
@@ -437,6 +494,19 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
         }
     }
 
+    private fun keepSystemBarsRedrawn(window: Window, rootView: View?) {
+        val decor = window.decorView
+        decor.viewTreeObserver.addOnPreDrawListener {
+            var clearBar = false
+            for (id in SYSTEM_BAR_BACKGROUNDS) {
+                val bar = decor.findViewById<View>(id)
+                if (bar != null && bar.isShown) bar.invalidate() else clearBar = true
+            }
+            if (clearBar && rootView?.isAttachedToWindow == true) rootView.invalidate()
+            true
+        }
+    }
+
     private fun injectWallpaper(view: View?) {
         val content = view as ViewGroup
         val rootView = content.getChildAt(0) as ViewGroup
@@ -469,6 +539,23 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
         rootView.addView(frameLayout, 0)
     }
 
+    private fun mapColor(color: Int): Int =
+        resolvedColors[color] ?: IColors.getFromIntColor(color, IColors.colors).also {
+            resolvedColors[color] = it
+        }
+
+    private class ConversationCheck(activity: Activity, val isConversation: Boolean) {
+        val activity = WeakReference(activity)
+    }
+
+    private fun isConversation(activity: Activity): Boolean {
+        val cached = conversationCheck
+        if (cached != null && cached.activity.get() === activity) return cached.isConversation
+        val result = activity.javaClass.simpleName == "Conversation"
+        conversationCheck = ConversationCheck(activity, result)
+        return result
+    }
+
     private fun checkNotHomeActivity(): Boolean {
         val homeClass = WppCore.homeActivityClass
         val currentActivity = WppCore.getCurrentActivity()
@@ -476,14 +563,26 @@ class CustomThemeV2(loader: ClassLoader, preferences: SharedPreferences) :
     }
 
     private fun checkNotApplyColor(color: Int): Boolean {
-        val activity = WppCore.getCurrentActivity()
-        if (activity != null && activity.javaClass.simpleName == "Conversation"
-            && ReflectionUtils.isCalledFromStrings("getValue")
-            && !ReflectionUtils.isCalledFromStrings("android.view")
-        ) {
-            return color != 0xff12181c.toInt()
+        if (color == CONVERSATION_ALLOWED_COLOR) return false
+        val activity = WppCore.getCurrentActivity() ?: return false
+        if (!isConversation(activity)) return false
+        return isGetValueOutsideViews()
+    }
+
+    private fun isGetValueOutsideViews(): Boolean {
+        val trace = Throwable().stackTrace
+        var fromGetValue = false
+        for (i in 2 until minOf(trace.size, 20)) {
+            val className = trace[i].className
+            val methodName = trace[i].methodName
+            if (className.contains("android.view") || methodName.contains("android.view")) {
+                return false
+            }
+            if (!fromGetValue && (className.contains("getValue") || methodName.contains("getValue"))) {
+                fromGetValue = true
+            }
         }
-        return false
+        return fromGetValue
     }
 
     override fun getPluginName(): String {

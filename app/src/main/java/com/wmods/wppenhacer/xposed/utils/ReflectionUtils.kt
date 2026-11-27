@@ -6,9 +6,11 @@ import com.wmods.wppenhacer.xposed.core.datastore.UnobfuscatorCacheDataStore
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
 import java.util.Arrays
 import java.util.Collections
 import java.util.WeakHashMap
+import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Predicate
 import java.util.stream.Collectors
 
@@ -18,6 +20,11 @@ object ReflectionUtils {
     private const val REFLECTION_NAMESPACE = UnobfuscatorCacheDataStore.NAMESPACE_REFLECTION
 
     private var cacheStore: UnobfuscatorCacheDataStore? = null
+
+    private val bestMatchMethodCache = ConcurrentHashMap<BestMatchKey, Method>()
+    private val namedFieldCache = ConcurrentHashMap<NamedFieldKey, Field>()
+    private val missingNamedFieldCache = ConcurrentHashMap.newKeySet<NamedFieldKey>()
+    private val declaredTypedFieldsCache = ConcurrentHashMap<TypedFieldsKey, List<Field>>()
 
     @JvmStatic
     fun initCache(context: Context) {
@@ -156,6 +163,43 @@ object ReflectionUtils {
         }
     }
 
+
+    private data class TypedFieldsKey(
+        val clazz: Class<*>,
+        val type: Class<*>,
+        val assignable: Boolean,
+        val instanceOnly: Boolean
+    )
+
+    @JvmStatic
+    @JvmOverloads
+    fun getDeclaredFieldsByType(
+        cls: Class<*>,
+        type: Class<*>,
+        instanceOnly: Boolean = false
+    ): List<Field> = getDeclaredTypedFields(TypedFieldsKey(cls, type, false, instanceOnly))
+
+    @JvmStatic
+    @JvmOverloads
+    fun getDeclaredFieldsByExtendType(
+        cls: Class<*>,
+        type: Class<*>,
+        instanceOnly: Boolean = false
+    ): List<Field> = getDeclaredTypedFields(TypedFieldsKey(cls, type, true, instanceOnly))
+
+    private fun getDeclaredTypedFields(key: TypedFieldsKey): List<Field> {
+        declaredTypedFieldsCache[key]?.let { return it }
+        val fields = try {
+            key.clazz.declaredFields.filter { field ->
+                (!key.instanceOnly || !Modifier.isStatic(field.modifiers)) &&
+                        if (key.assignable) key.type.isAssignableFrom(field.type)
+                        else field.type == key.type
+            }.onEach { it.isAccessible = true }
+        } catch (_: LinkageError) {
+            emptyList()
+        }
+        return declaredTypedFieldsCache.putIfAbsent(key, fields) ?: fields
+    }
 
     @JvmStatic
     fun getFieldsByExtendType(cls: Class<*>, type: Class<*>?): List<Field> {
@@ -569,13 +613,13 @@ object ReflectionUtils {
 
     fun callMethod(instance: Any?, methodName: String?, vararg args: Any?): Any? {
         if (instance == null || methodName == null) throw NullPointerException("instance and methodName must not be null")
-        val method = findMethodBestMatchByArgs(instance.javaClass, methodName, args)
+        val method = findMethodBestMatchCached(instance.javaClass, methodName, args)
         return method.invoke(instance, *args)
     }
 
     fun callStaticMethod(clazz: Class<*>?, methodName: String?, vararg args: Any?): Any? {
         if (clazz == null || methodName == null) throw NullPointerException("clazz and methodName must not be null")
-        val method = findMethodBestMatchByArgs(clazz, methodName, args)
+        val method = findMethodBestMatchCached(clazz, methodName, args)
         return method.invoke(null, *args)
     }
 
@@ -643,16 +687,44 @@ object ReflectionUtils {
         findFieldRecursive(klass, fieldName).setDouble(null, value)
     }
 
+    private data class NamedFieldKey(val clazz: Class<*>, val fieldName: String)
+
     private fun findFieldRecursive(clazz: Class<*>, fieldName: String): Field {
+        val key = NamedFieldKey(clazz, fieldName)
+        namedFieldCache[key]?.let { return it }
+        if (key in missingNamedFieldCache) {
+            throw NoSuchFieldException("Field $fieldName not found in ${clazz.name}")
+        }
         var current: Class<*>? = clazz
         while (current != null) {
             try {
-                return current.getDeclaredField(fieldName).apply { isAccessible = true }
+                val field = current.getDeclaredField(fieldName).apply { isAccessible = true }
+                namedFieldCache[key] = field
+                return field
             } catch (_: NoSuchFieldException) {
                 current = current.superclass
             }
         }
+        missingNamedFieldCache.add(key)
         throw NoSuchFieldException("Field $fieldName not found in ${clazz.name}")
+    }
+
+    private data class BestMatchKey(
+        val clazz: Class<*>,
+        val methodName: String,
+        val argTypes: List<Class<*>?>
+    )
+
+    private fun findMethodBestMatchCached(
+        clazz: Class<*>,
+        methodName: String,
+        args: Array<out Any?>
+    ): Method {
+        val argTypes = if (args.isEmpty()) emptyList() else args.map { it?.javaClass }
+        val key = BestMatchKey(clazz, methodName, argTypes)
+        bestMatchMethodCache[key]?.let { return it }
+        return findMethodBestMatchByArgs(clazz, methodName, args)
+            .also { bestMatchMethodCache[key] = it }
     }
 
     private fun findMethodBestMatchByArgs(

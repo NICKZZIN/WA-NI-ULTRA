@@ -20,6 +20,8 @@ import android.widget.Toast
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toDrawable
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
+import com.highcapable.yukihookapi.extension.kavaref.hookAll
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.core.WppCore
@@ -56,6 +58,7 @@ class SeenTick(
         private var mWaJobManager: Any? = null
         private var mSendReadClass: Class<*>? = null
         private var waJobManagerMethod: Method? = null
+        private const val MAX_BLUE_TICK_SEND_MESSAGES = 50
 
         private var cachedSeenDrawable: Drawable? = null
         private var cachedUnseenDrawable: Drawable? = null
@@ -198,6 +201,9 @@ class SeenTick(
         val ifaceKeyStatusItemClass =
             Unobfuscator.loadUnknownStatusPlaybackMethod(classLoader).parameterTypes.first()
         val replyContainerMethod = Unobfuscator.loadStatusPlaybackReplyContainer(classLoader)
+        val replyContainerViewMethod = runCatching {
+            Unobfuscator.loadStatusPlaybackReplyContainerViewMethod(classLoader)
+        }.onFailure { logDebug(it) }.getOrNull()
 
         if (ticktype == 1) {
             if (!xprefs.getBoolean("hidestatusview", false)) return
@@ -226,7 +232,8 @@ class SeenTick(
                         }
                     val replyContainer =
                         replyContainerMethod.invoke(fieldViewContainer.get(instance))
-                    val replyView = ReflectionUtils.callMethod(replyContainer, "A01") as View
+                    val replyView = replyContainerViewMethod?.invoke(replyContainer) as? View
+                        ?: return@after
                     val contentView =
                         replyView.findViewById<LinearLayout>(
                             Utils.getID(
@@ -291,6 +298,7 @@ class SeenTick(
 
                     scope.launch(Dispatchers.IO) {
                         val item = MessageHistoryStore.getInstance().getHideSeenMessage(
+                            "status@broadcast",
                             "status@broadcast",
                             fstatus.messageID,
                             MessageHistoryStore.ReceiptType.READ
@@ -410,12 +418,14 @@ class SeenTick(
                         val messageID = fMessage.key.messageID
                         MessageHistoryStore.getInstance().updateViewedMessage(
                             userJid.phoneRawString,
+                            userJid.userRawString,
                             messageID,
                             MessageHistoryStore.ReceiptType.PLAYED,
                             true
                         )
                         MessageHistoryStore.getInstance().updateViewedMessage(
                             userJid.phoneRawString,
+                            userJid.userRawString,
                             messageID,
                             MessageHistoryStore.ReceiptType.READ,
                             true
@@ -451,16 +461,19 @@ class SeenTick(
                             ReflectionUtils.getObjectField(fieldType, instance)
                         val fMessage = FMessageWpp.Key(keyMessage).fMessage ?: return@launch
                         val rawJid = fMessage.key.remoteJid.phoneRawString
+                        val rawUserJid = fMessage.key.remoteJid.userRawString
                         val messageID = fMessage.key.messageID
 
                         MessageHistoryStore.getInstance().updateViewedMessage(
                             rawJid,
+                            rawUserJid,
                             messageID,
                             MessageHistoryStore.ReceiptType.PLAYED,
                             true
                         )
                         MessageHistoryStore.getInstance().updateViewedMessage(
                             rawJid,
+                            rawUserJid,
                             messageID,
                             MessageHistoryStore.ReceiptType.READ,
                             true
@@ -522,15 +535,26 @@ class SeenTick(
                 )
             ) return@launch
 
-            val messages = ArrayList<FMessageWpp>()
             val hiddenMessages = MessageHistoryStore.getInstance()
                 .getHideSeenMessages(
                     userJid.phoneRawString,
+                    userJid.userRawString,
                     MessageHistoryStore.ReceiptType.READ,
                     false
                 )
+                ?.distinctBy { it.message }
+            if (hiddenMessages.isNullOrEmpty()) return@launch
 
-            hiddenMessages?.forEach { message ->
+            MessageHistoryStore.getInstance().updateViewedMessagesBatch(
+                userJid.phoneRawString,
+                userJid.userRawString,
+                hiddenMessages.map { it.message },
+                MessageHistoryStore.ReceiptType.READ,
+                true
+            )
+
+            val messages = ArrayList<FMessageWpp>(MAX_BLUE_TICK_SEND_MESSAGES)
+            hiddenMessages.takeLast(MAX_BLUE_TICK_SEND_MESSAGES).forEach { message ->
                 message.fMessage?.let { messages.add(it) }
             }
 
@@ -540,21 +564,13 @@ class SeenTick(
                 if (m.mediaType == 2) {
                     MessageHistoryStore.getInstance().updateViewedMessage(
                         userJid.phoneRawString,
+                        userJid.userRawString,
                         m.key.messageID,
                         MessageHistoryStore.ReceiptType.PLAYED,
                         true
                     )
                     sendBlueTickMedia(m)
                 }
-            }
-
-            messages.forEach { msg ->
-                MessageHistoryStore.getInstance().updateViewedMessage(
-                    userJid.phoneRawString,
-                    msg.key.messageID,
-                    MessageHistoryStore.ReceiptType.READ,
-                    true
-                )
             }
 
             sendBlueTickMsg(userJid, messages)
@@ -627,7 +643,8 @@ class SeenTick(
                 for (i in 0 until size) {
                     val msgId = fstatus[i].messageID
                     arrS[i] = msgId
-                    messageHistory.updateViewedMessage(
+                    messageHistory.insertHideSeenMessage(
+                        "status@broadcast",
                         "status@broadcast",
                         msgId,
                         MessageHistoryStore.ReceiptType.READ,
@@ -666,12 +683,15 @@ class SeenTick(
                 val rowsId = arrayOf(fMessage.rowId)
                 val messageId = fMessage.key.messageID
 
-                val participantInfo = pInfoConstructor.newInstance(
-                    userJid.userJid,
-                    participant,
-                    rowsId,
-                    arrayOf(messageId)
-                )
+                val known = arrayOf<Any?>(userJid.userJid, participant, rowsId, arrayOf(messageId))
+                val pInfoArgs = pInfoConstructor.parameterTypes.mapIndexed { i, type ->
+                    when {
+                        i < known.size -> known[i]
+                        type == Boolean::class.javaPrimitiveType -> false
+                        else -> null
+                    }
+                }.toTypedArray()
+                val participantInfo = pInfoConstructor.newInstance(*pInfoArgs)
                 val sendJob = ReflectionUtils.newInstance(sPlayedClass, participantInfo, false)
 
                 waJobManagerMethod?.invoke(mWaJobManager, sendJob)

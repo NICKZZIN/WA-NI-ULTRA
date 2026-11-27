@@ -3,10 +3,13 @@ package com.wmods.wppenhacer.xposed.core.components
 import android.content.SharedPreferences
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.kavaref.condition.type.Modifiers
+import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.highcapable.yukihookapi.hook.param.HookParam
 import com.highcapable.yukihookapi.hook.param.PackageParam
 import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator.loadSharedPreferencesClasses
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
+import java.lang.reflect.Method
 import java.util.concurrent.CopyOnWriteArraySet
 
 class SharedPreferencesWrapper(private val mPreferences: SharedPreferences) : SharedPreferences {
@@ -109,24 +112,27 @@ class SharedPreferencesWrapper(private val mPreferences: SharedPreferences) : Sh
                     }
                 }
 
+                val hookedMethods = HashSet<Method>()
+
                 for (sharedPreferencesClass in sharedPreferencesClasses) {
                     if (SharedPreferencesWrapper::class.java.name == sharedPreferencesClass.name) continue
-                    for (methodName in listOf(
-                        "getString",
-                        "getStringSet",
-                        "getInt",
-                        "getLong",
-                        "getFloat",
-                        "getBoolean",
-                        "contains"
-                    )) {
-                        sharedPreferencesClass.resolve().method {
+
+                    fun implementation(methodName: String, vararg parameterTypes: Any) =
+                        sharedPreferencesClass.resolve().optional(silent = true).firstMethodOrNull {
                             name = methodName
-                        }.hookAll { after(applyKeyHook) }
-                    }
-                    sharedPreferencesClass.resolve().method {
-                        name = "getAll"
-                    }.hookAll { after(getAllHook) }
+                            if (parameterTypes.isEmpty()) emptyParameters() else parameters(*parameterTypes)
+                            modifiersNot(Modifiers.ABSTRACT)
+                            superclass(interfaces = true)
+                        }?.takeIf { hookedMethods.add(it.self) }
+
+                    implementation("getString", String::class, String::class)?.hook { after(applyKeyHook) }
+                    implementation("getStringSet", String::class, Set::class)?.hook { after(applyKeyHook) }
+                    implementation("getInt", String::class, Int::class)?.hook { after(applyKeyHook) }
+                    implementation("getLong", String::class, Long::class)?.hook { after(applyKeyHook) }
+                    implementation("getFloat", String::class, Float::class)?.hook { after(applyKeyHook) }
+                    implementation("getBoolean", String::class, Boolean::class)?.hook { after(applyKeyHook) }
+                    implementation("contains", String::class)?.hook { after(applyKeyHook) }
+                    implementation("getAll")?.hook { after(getAllHook) }
                 }
             }
         }

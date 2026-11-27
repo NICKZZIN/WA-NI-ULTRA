@@ -14,6 +14,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
 import com.wmods.wppenhacer.xposed.core.devkit.UnobfuscatorCache
@@ -67,6 +68,10 @@ class FilterGroups(
         publishResultsMethod.hook {
             before {
                 val filters = args[1]
+                if (filters?.javaClass == publishResultsMethod.parameterTypes[1]) {
+                    result = null
+                    return@before
+                }
                 val chatsList = ReflectionUtils.getObjectField(filters, "values") as? List<*>
                 val resultList = filterList(chatsList)
 

@@ -1,6 +1,7 @@
 package com.wmods.wppenhacer.xposed.core.components
 
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hookAll
 import com.highcapable.yukihookapi.hook.param.PackageParam
 import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
@@ -143,10 +144,14 @@ class WaContactWpp(instance: Any?) {
     val waName: String?
         get() {
             return try {
-                if (fieldContactData!!.type.isAssignableFrom(fieldGetWaName!!.declaringClass)) {
-                    return fieldGetWaName?.get(waContactData) as? String
+                if (fieldContactData?.type?.isAssignableFrom(
+                        fieldGetWaName?.declaringClass ?: Any::class.java
+                    ) == true
+                ) {
+                    waContactData?.let { fieldGetWaName?.get(it) } as? String
+                } else {
+                    fieldGetWaName?.get(mInstance) as? String
                 }
-                fieldGetWaName?.get(mInstance) as? String
             } catch (e: Exception) {
                 YukiLog.log(e)
                 null

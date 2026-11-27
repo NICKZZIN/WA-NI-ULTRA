@@ -12,6 +12,7 @@ import com.wmods.wppenhacer.databinding.ActivityAboutBinding
 
 class AboutActivity : BaseActivity() {
     private val contributors = arrayOf(
+        arrayOf("NICKZZIN", "https://github.com/NICKZZIN"),
         arrayOf("Dev4Mod", "https://github.com/Dev4Mod"),
         arrayOf("frknkrc44", "https://github.com/frknkrc44"),
         arrayOf("mubashardev", "https://github.com/mubashardev"),
@@ -38,7 +39,7 @@ class AboutActivity : BaseActivity() {
         setContentView(binding.root)
 
         binding.btnTelegram.setOnClickListener { openUrl("https://t.me/NickC137") }
-        binding.btnGithub.setOnClickListener { openUrl("https://github.com/Dev4Mod/WaEnhancer") }
+        binding.btnGithub.setOnClickListener { openUrl("https://github.com/NICKZZIN/WA-NI-ULTRA") }
 
         val contributorTopMargin = resources.getDimensionPixelSize(R.dimen.spacing_small)
         contributors.forEachIndexed { index, contributor ->

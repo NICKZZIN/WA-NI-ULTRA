@@ -40,8 +40,8 @@ android {
         minSdk = 28
         //noinspection OldTargetApi
         targetSdk = 34
-        versionCode = 161
-        versionName = "1.6.1 ($gitHash)"
+        versionCode = 167
+        versionName = "1.6.7 ($gitHash)"
         multiDexEnabled = true
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -67,7 +67,11 @@ android {
 
     packaging {
         resources {
-            excludes += "META-INF/**"
+            excludes += "META-INF/*.kotlin_module"
+            excludes += "META-INF/AL2.0"
+            excludes += "META-INF/LGPL2.1"
+            excludes += "META-INF/LICENSE*"
+            excludes += "META-INF/NOTICE*"
             excludes += "okhttp3/**"
             excludes += "kotlin/**"
             excludes += "org/**"
@@ -103,8 +107,7 @@ android {
 
         release {
             isMinifyEnabled = true
-            //noinspection NotShrinkingResources
-            isShrinkResources = false
+            isShrinkResources = true
             signingConfig =
                 if (signingConfigs["config"].storeFile != null) signingConfigs["config"] else signingConfigs["debug"]
             proguardFiles(
@@ -131,6 +134,10 @@ android {
     }
 
     androidResources.additionalParameters += listOf("--allow-reserved-package-id", "--package-id", "0x64")
+    // Ship only the languages the app is translated to; libraries bring ~90 others
+    androidResources.localeFilters += listOf(
+        "en", "ar", "de", "es", "fr", "id", "in", "it", "iw", "pt", "ru", "tr", "zh"
+    )
 
 }
 
@@ -144,15 +151,12 @@ androidComponents {
             output.outputFileName.set(output.versionName.map { "$appName-$it.apk" })
         }
 
-        // Hotfix: YukiHookAPI's KSP generates xposed_init / yukihookapi_init, so the
-        // asset and resource merge tasks must run after it or the entrypoint is missing.
+        // Hotfix: YukiHookAPI's KSP generates META-INF/xposed/*, so the java resource
+        // merge task must run after it or the entrypoint is missing.
         val cap = variant.name.replaceFirstChar { c ->
             if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString()
         }
         val kspTask = "ksp${cap}Kotlin"
-        tasks.matching { it.name == "merge${cap}Assets" }.configureEach {
-            dependsOn(kspTask)
-        }
         tasks.matching { it.name == "merge${cap}JavaResource" }.configureEach {
             dependsOn(kspTask)
         }
@@ -168,13 +172,16 @@ kotlin {
 dependencies {
     testImplementation("junit:junit:4.13.2")
     implementation(libs.colorpicker)
-    implementation(files("libs/dexkit-android.aar"))
+    implementation(libs.dexkit)
     implementation(libs.flatbuffers)
-    compileOnly(libs.libxposed.legacy)
-    implementation(libs.yukihookapi.api)
+    compileOnly(libs.libxposed.api)
+    implementation(platform(libs.yukihook.bom))
+    implementation(libs.yukihook.core)
+    implementation(libs.yukihook.runtime.libxposed)
+    implementation(libs.yukihook.extension.kavaref)
     implementation(libs.kavaref.core)
     implementation(libs.kavaref.extension)
-    ksp(libs.yukihookapi.ksp.xposed)
+    ksp(libs.yukihook.compiler)
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.core)
@@ -199,7 +206,6 @@ dependencies {
     implementation(libs.bcpkix.jdk18on)
     implementation(libs.arscblamer)
     implementation(libs.markwon.core)
-    implementation(libs.androidx.datastore.preferences)
 }
 
 

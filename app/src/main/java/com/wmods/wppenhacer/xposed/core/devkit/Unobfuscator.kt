@@ -23,11 +23,15 @@ import com.wmods.wppenhacer.xposed.core.components.FMessageWpp
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
 import com.wmods.wppenhacer.xposed.utils.Utils
 import com.wmods.wppenhacer.xposed.utils.YukiLog
-import org.luckypray.dexkit.DexKitBridge
+import org.luckypray.dexkit.query.FindClass
+import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.enums.StringMatchType
+import org.luckypray.dexkit.query.enums.UsingType
 import org.luckypray.dexkit.query.matchers.base.OpCodesMatcher
 import org.luckypray.dexkit.result.ClassData
+import org.luckypray.dexkit.result.ClassDataList
 import org.luckypray.dexkit.result.MethodData
+import org.luckypray.dexkit.result.MethodDataList
 import org.luckypray.dexkit.util.DexSignUtil
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
@@ -44,22 +48,32 @@ import java.util.stream.Collectors
 
 object Unobfuscator {
 
-    private lateinit var bridge: DexKitBridge
+    private var dexKitManager: DexKitManager? = null
+    private val bridge = BridgeRouter()
 
     val cacheClasses = ConcurrentHashMap<String, Class<*>>()
-
-    init {
-        System.loadLibrary("dexkit")
-    }
 
     @JvmStatic
     fun initWithPath(path: String): Boolean {
         return try {
-            bridge = DexKitBridge.create(path)
+            dexKitManager?.close()
+            dexKitManager = DexKitManager(path)
             true
         } catch (_: Exception) {
             false
         }
+    }
+
+    @JvmStatic
+    @Throws(Exception::class)
+    fun <T> withDexKitBridge(callable: DexKitManager.BridgeCallable<T>): T {
+        val manager = dexKitManager ?: throw IllegalStateException("DexKit manager not initialized")
+        return manager.withBridge(callable)
+    }
+
+    @JvmStatic
+    fun releaseDexKitResources() {
+        dexKitManager?.releaseStartupBridge()
     }
 
     @Throws(Exception::class)
@@ -156,6 +170,7 @@ object Unobfuscator {
     ): Class<*> {
         return UnobfuscatorCache.getInstance().getClass(classLoader, name) {
             val result = bridge.findClass {
+                findFirst = type == StringMatchType.Equals
                 matcher {
                     className(name, type)
                 }
@@ -466,10 +481,22 @@ object Unobfuscator {
                 "com.whatsapp.conversationslist.ConversationsFragment",
                 classLoader
             )
-            Arrays.stream(clsFrag.declaredMethods).parallel()
-                .filter { m -> m.parameterTypes.isEmpty() && m.returnType == MutableList::class.java }
-                .findFirst()
-                .orElse(null) ?: throw Exception("TabFragment method not found")
+            val hierarchy = generateSequence(clsFrag) { it.superclass }
+                .takeWhile { it != Any::class.java }
+                .toList()
+            val interfaceMethodNames = HashSet<String>()
+            val pendingInterfaces = ArrayDeque(hierarchy.flatMap { it.interfaces.asList() })
+            while (pendingInterfaces.isNotEmpty()) {
+                val iface = pendingInterfaces.removeFirst()
+                iface.declaredMethods.forEach { interfaceMethodNames.add(it.name) }
+                pendingInterfaces.addAll(iface.interfaces)
+            }
+            hierarchy.firstNotNullOfOrNull { cls ->
+                cls.declaredMethods.firstOrNull {
+                    it.parameterTypes.isEmpty() && it.returnType == MutableList::class.java &&
+                            it.name !in interfaceMethodNames
+                }
+            } ?: throw Exception("TabFragment method not found")
         }
     }
 
@@ -477,6 +504,18 @@ object Unobfuscator {
     @JvmStatic
     fun loadTabNameMethod(classLoader: ClassLoader): Method {
         return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            val byOverrideString = bridge.findMethod {
+                matcher {
+                    returnType(String::class.java)
+                    paramTypes(Int::class.java.name)
+                    usingStrings("No tab title override for tab id: ")
+                    usingNumbers(200, 300, 400)
+                }
+            }
+            if (byOverrideString.isNotEmpty()) {
+                return@getMethod byOverrideString[0].getMethodInstance(classLoader)
+            }
+
             val id = UnobfuscatorCache.getInstance().getOfuscateIDString("updates")
             if (id < 1) throw Exception("TabName ID not found")
             val result = bridge.findMethod {
@@ -773,36 +812,178 @@ object Unobfuscator {
         }
     }
 
-    @Throws(Exception::class)
-    @JvmStatic
-    fun loadHomeConversationFragmentMethod(loader: ClassLoader): Method {
+    fun loadPropsResolveMethod(loader: ClassLoader): Method {
         return UnobfuscatorCache.getInstance().getMethod(loader) {
-            val homeClass = WppCore.homeActivityClass
-            val convFragment =
-                findFirstClassUsingName(loader, StringMatchType.EndsWith, ".ConversationFragment")
-            val method = bridge.findMethod {
-                searchInClass(Collections.singletonList(bridge.getClassData(homeClass)))
-                matcher {
-                    returnType(convFragment)
+            val propsClass = loadPropsBooleanMethod(loader).declaringClass
+            val candidates = propsClass.declaredMethods.filter {
+                val types = it.parameterTypes
+                Modifier.isStatic(it.modifiers)
+                        && it.returnType == Any::class.java
+                        && types.size >= 4
+                        && types[1] == propsClass
+                        && types[types.size - 2] == Int::class.javaPrimitiveType
+                        && types[types.size - 1] == Boolean::class.javaPrimitiveType
+            }
+            val instanceCandidates by lazy {
+                propsClass.declaredMethods.filter {
+                    val types = it.parameterTypes
+                    !Modifier.isStatic(it.modifiers)
+                            && it.returnType == Any::class.java
+                            && types.size >= 5
+                            && types[1] == Int::class.javaObjectType
+                            && (types.last() == Int::class.javaPrimitiveType
+                            || (types.last() == Boolean::class.javaPrimitiveType
+                            && types[types.size - 2] == Int::class.javaPrimitiveType))
                 }
-            }.singleOrNull() ?: throw Exception("HomeConversationFragmentMethod not found")
-            method.getMethodInstance(loader)
+            }
+            candidates.singleOrNull()
+                ?: candidates.singleOrNull { it.parameterTypes[2] == Int::class.javaObjectType }
+                ?: instanceCandidates.singleOrNull()
+                ?: throw Exception("Props resolve method not found (${candidates.size} static, ${instanceCandidates.size} instance candidates)")
+        }
+    }
+
+    @Throws(Exception::class)
+    fun loadVideoUploadParamsClass(classLoader: ClassLoader): Class<*> {
+        return UnobfuscatorCache.getInstance().getClass(classLoader) {
+            findFirstClassUsingStrings(
+                classLoader,
+                StringMatchType.Equals,
+                "shouldTranscodeAudio",
+                "isSkipAudioTrack"
+            ) ?: throw Exception("VideoUploadParams class not found")
+        }
+    }
+
+    @Throws(Exception::class)
+    fun loadVideoUploadParamsFields(classLoader: ClassLoader): HashMap<String, Field> {
+        return UnobfuscatorCache.getInstance().getMapField(classLoader) {
+            val clazz = loadVideoUploadParamsClass(classLoader)
+            val methodData = bridge.getMethodData(clazz.getDeclaredMethod("toString"))
+            val usingFields = methodData?.usingFields ?: emptyList()
+            val usingStrings = methodData?.usingStrings ?: emptyList()
+            val constantKeys = setOf("enableAVSynchronizedTranscoding", "sonicFactory")
+
+            val result = HashMap<String, Field>()
+            var idxFields = 0
+            for (key in usingStrings) {
+                if (idxFields == usingFields.size) break
+                if (key in constantKeys) continue
+                result[key] = usingFields[idxFields].field.getFieldInstance(classLoader)
+                idxFields++
+            }
+            if (result["shouldTranscodeAudio"]?.type != Boolean::class.javaPrimitiveType) {
+                throw Exception("VideoUploadParams fields are misaligned")
+            }
+            result
+        }
+    }
+
+    @JvmStatic
+    @Throws(Exception::class)
+    fun loadStatusItemTimestampMethod(loader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(loader) {
+            val statusItemClass =
+                loadUnknownStatusPlaybackMethod(loader).parameterTypes.first()
+            val isStatusExpired = bridge.findMethod {
+                matcher {
+                    addUsingString("StatusInfoStore/isStatusExpired", StringMatchType.Contains)
+                }
+            }.firstOrNull() ?: throw Exception("isStatusExpired method not found")
+            val candidates = sequenceOf(isStatusExpired) + isStatusExpired.callers.asSequence()
+                .filter { it.paramTypeNames.contains(statusItemClass.name) }
+            val getter = candidates.flatMap { it.invokes.asSequence() }.firstOrNull { invoke ->
+                invoke.isMethod &&
+                        invoke.paramCount == 0 &&
+                        invoke.returnTypeName == Long::class.javaPrimitiveType!!.name &&
+                        invoke.className == statusItemClass.name
+            } ?: throw Exception("StatusItem timestamp method not found")
+            getter.getMethodInstance(loader)
+        }
+    }
+
+    @JvmStatic
+    @Throws(Exception::class)
+    fun loadSelectedThemeSchemeMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            bridge.findMethod {
+                matcher {
+                    modifiers = Modifier.STATIC
+                    paramCount = 1
+                    usingStrings("selected_scheme_id")
+                }
+            }.firstOrNull {
+                it.paramTypeNames.firstOrNull() == it.className && it.returnTypeName != "void"
+            }?.getMethodInstance(classLoader)
+                ?: throw NoSuchMethodException("Selected theme scheme method not found")
+        }
+    }
+
+    @JvmStatic
+    @Throws(Exception::class)
+    fun loadDefaultThemeSchemeField(classLoader: ClassLoader): Field {
+        return UnobfuscatorCache.getInstance().getField(classLoader) {
+            val method = loadSelectedThemeSchemeMethod(classLoader)
+            val methodData = bridge.getMethodData(DexSignUtil.getMethodDescriptor(method))
+                ?: throw NoSuchFieldException("Selected theme scheme method data not found")
+            val schemeFields = methodData.usingFields.filter {
+                it.field.declaredClassName == method.declaringClass.name &&
+                        it.field.typeName == method.returnType.name
+            }
+            val written = schemeFields.filter { it.usingType.isWrite() }.map { it.field.name }.toSet()
+            schemeFields.firstOrNull { it.field.name !in written }?.field?.getFieldInstance(classLoader)
+                ?: throw NoSuchFieldException("Default theme scheme field not found")
         }
     }
 
     @Throws(Exception::class)
     @JvmStatic
-    fun loadAntiRevokeConvFragmentField(loader: ClassLoader): Field {
-        return UnobfuscatorCache.getInstance().getField(loader) {
+    fun loadHomeConversationFragmentMethod(loader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(loader) {
+            bridge.findMethod {
+                matcher {
+                    usingStrings("com.whatsapp.home.ui.HomeActivity.ConversationFragment")
+                    paramCount = 0
+                }
+            }.firstOrNull { it.returnTypeName.endsWith(".ConversationFragment") }
+                ?.getMethodInstance(loader)
+                ?: throw Exception("HomeConversationFragmentMethod not found")
+        }
+    }
+
+    private val FRAMEWORK_PACKAGES =
+        listOf("java.", "javax.", "kotlin.", "android.", "androidx.", "com.google.")
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadHomeConversationDelegateFields(loader: ClassLoader): Array<Field> {
+        return UnobfuscatorCache.getInstance().getFields(loader) {
             val chatClass = findFirstClassUsingStrings(
                 loader,
                 StringMatchType.Contains,
                 "conversation/createconversation"
             )
-            val conversation =
-                findFirstClassUsingName(loader, StringMatchType.EndsWith, ".ConversationFragment")
-            ReflectionUtils.getFieldByType(conversation, chatClass)
-                ?: throw Exception("AntiRevokeConvChat field not found")
+            val fragmentClass = loadHomeConversationFragmentMethod(loader).returnType
+
+            fun holdsDelegate(field: Field): Boolean =
+                field.type != Any::class.java && field.type.isAssignableFrom(chatClass)
+
+            fun instanceFields(cls: Class<*>): List<Field> =
+                generateSequence(cls) { it.superclass }
+                    .takeWhile { it != Any::class.java }
+                    .flatMap { it.declaredFields.asSequence() }
+                    .filter { !Modifier.isStatic(it.modifiers) && !it.type.isPrimitive }
+                    .toList()
+
+            val fragmentFields = fragmentClass.declaredFields
+                .filter { !Modifier.isStatic(it.modifiers) && !it.type.isPrimitive }
+            fragmentFields.firstOrNull(::holdsDelegate)?.let { return@getFields arrayOf(it) }
+            fragmentFields.filter { holder ->
+                FRAMEWORK_PACKAGES.none { holder.type.name.startsWith(it) }
+            }.firstNotNullOfOrNull { holder ->
+                instanceFields(holder.type).firstOrNull(::holdsDelegate)
+                    ?.let { arrayOf(holder, it) }
+            } ?: throw NoSuchFieldException("HomeConversationDelegate fields not found")
         }
     }
 
@@ -819,6 +1000,27 @@ object Unobfuscator {
             val jidClass = findFirstClassUsingName(loader, StringMatchType.EndsWith, "jid.Jid")
             ReflectionUtils.getFieldByExtendType(chatClass, jidClass)
                 ?: throw Exception("UserJidConversationDelegate field not found")
+        }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadNoneIncomingAckClass(loader: ClassLoader, ackType: Class<*>): Class<*> {
+        return UnobfuscatorCache.getInstance().getClass(loader) {
+            bridge.findClass {
+                matcher {
+                    addInterface(ackType.name)
+                    methods {
+                        add {
+                            name = "toString"
+                            usingStrings("None")
+                        }
+                    }
+                }
+            }.firstOrNull { data ->
+                val clazz = data.getInstance(loader)
+                clazz.declaredFields.any { it.type == clazz && Modifier.isStatic(it.modifiers) }
+            }?.getInstance(loader) ?: throw Exception("NoneIncomingAck class not found")
         }
     }
 
@@ -1267,8 +1469,31 @@ object Unobfuscator {
                 loader,
                 StringMatchType.Contains,
                 "FMessageUtil/getOriginalMessageKeyIfEdited"
-            )
-                ?: throw RuntimeException("MessageEdit method not found")
+            )?.let { return@getMethod it }
+
+            val fmessageClass = loadFMessageClass(loader)
+            val keyField = loadMessageKeyField(loader)
+            val keyClassName = keyField.type.name
+            bridge.findMethod {
+                matcher {
+                    modifiers = Modifier.STATIC
+                    paramTypes(fmessageClass.name)
+                    returnType = keyClassName
+                    addUsingField(DexSignUtil.getFieldDescriptor(keyField), UsingType.Read)
+                    addInvoke {
+                        declaredClass(fmessageClass.name)
+                        returnType = Boolean::class.java.name
+                        paramCount = 0
+                    }
+                }
+            }.firstOrNull { method ->
+                method.invokes.any { invoke ->
+                    invoke.isMethod && invoke.declaredClassName != fmessageClass.name &&
+                            invoke.paramTypeNames == listOf(fmessageClass.name) &&
+                            invoke.returnType?.fields?.any { it.typeName == keyClassName } == true
+                }
+            }?.getMethodInstance(loader)
+                ?: throw RuntimeException("OriginalMessageKey method not found")
         }
     }
 
@@ -1435,7 +1660,7 @@ object Unobfuscator {
                 loader
             )
             Arrays.stream(clazz.declaredMethods).filter { m ->
-                m.parameterCount == 3 && m.returnType == View::class.java && m.parameterTypes[1] == LayoutInflater::class.java
+                m.parameterCount == 3 && m.returnType == View::class.java && LayoutInflater::class.java in m.parameterTypes
             }.findFirst().orElse(null)
                 ?: throw RuntimeException("GetViewConversation method not found")
         }
@@ -1543,6 +1768,26 @@ object Unobfuscator {
                 "hasNewsletterSubscriptions"
             )
                 ?: throw RuntimeException("RemoveChannelRec class not found")
+        }
+    }
+
+    fun loadUpdatesFragmentOnStartMethod(loader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(loader) {
+            findFirstMethodUsingStrings(
+                loader,
+                StringMatchType.Equals,
+                "UpdatesFragment/onStart"
+            ) ?: throw NoSuchMethodException("UpdatesFragment onStart not found")
+        }
+    }
+
+    fun loadUpdatesFragmentAsyncInitMethod(loader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(loader) {
+            findFirstMethodUsingStrings(
+                loader,
+                StringMatchType.Equals,
+                "UpdatesFragment/onFragmentAsyncInit"
+            ) ?: throw NoSuchMethodException("UpdatesFragment async init not found")
         }
     }
 
@@ -1978,7 +2223,12 @@ object Unobfuscator {
     @JvmStatic
     fun loadHeaderChannelItemClass(classLoader: ClassLoader): Class<*> {
         return UnobfuscatorCache.getInstance().getClass(classLoader) {
-            findFirstClassUsingStrings(classLoader, StringMatchType.Contains, "statusTilesEnabled")
+            findFirstClassUsingStrings(
+                classLoader,
+                StringMatchType.Contains,
+                "NewsletterHeaderDataItem(enableExploreButton="
+            )
+                ?: findFirstClassUsingStrings(classLoader, StringMatchType.Contains, "statusTilesEnabled")
                 ?: throw RuntimeException("HeaderChannelItem class not found")
         }
     }
@@ -2056,56 +2306,6 @@ object Unobfuscator {
                 "sendmethods/sendClearDirty"
             )
                 ?: throw RuntimeException("SenderPlayed class not found")
-        }
-    }
-
-    @Throws(Exception::class)
-    @JvmStatic
-    fun loadSenderPlayedMethod(classLoader: ClassLoader): Method {
-        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
-            val clazz = loadSenderPlayedClass(classLoader)
-            val abstractMediaMessageClass = loadAbstractMediaMessageClass(classLoader)
-            val interfaces = abstractMediaMessageClass.interfaces
-
-            val interfacesList = ArrayList<Class<*>>()
-            interfacesList.add(abstractMediaMessageClass)
-            interfacesList.addAll(listOf(*interfaces))
-
-            var methodResult: Method? = null
-            main_loop@ for (method in clazz.methods) {
-                if (method.parameterCount != 1) continue
-                val parameterType = method.parameterTypes[0]
-                for (interfaceClass in interfacesList) {
-                    if (interfaceClass.isAssignableFrom(parameterType)) {
-                        methodResult = method
-                        break@main_loop
-                    }
-                }
-            }
-
-            val fmessageClass = loadFMessageClass(classLoader)
-            if (methodResult == null) {
-                val method = findFirstMethodUsingStrings(
-                    classLoader,
-                    StringMatchType.Contains,
-                    "mediaHash and fileType not both present for upload URL generation"
-                )
-                if (method != null) {
-                    val cMethods = bridge.getMethodData(method)!!.invokes
-                    Collections.reverse(cMethods)
-                    for (cmethod in cMethods) {
-                        if (cmethod.isMethod && cmethod.paramCount == 1) {
-                            val cParamType = cmethod.paramTypes[0].getInstance(classLoader)
-                            if (fmessageClass.isAssignableFrom(cParamType)) {
-                                methodResult = cmethod.getMethodInstance(classLoader)
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-
-            methodResult ?: throw RuntimeException("SenderPlayed method not found 2")
         }
     }
 
@@ -2407,22 +2607,26 @@ object Unobfuscator {
                 StringMatchType.EndsWith,
                 ".ConversationsFragment"
             )
-            val convClassData = bridge.getClassData(convClass.name)!!
-            convClassData.findMethod {
-                matcher {
-                    anyOf {
-                        statusClass.declaredMethods.filter {
-                            it.returnType == Boolean::class.javaPrimitiveType
-                        }.forEach {
-                            match {
-                                addInvoke(DexSignUtil.getMethodDescriptor(it))
+            generateSequence(convClass) { it.superclass }
+                .takeWhile { it.name.contains("ConversationsFragment") }
+                .firstNotNullOfOrNull { clazz ->
+                    bridge.getClassData(clazz.name)?.findMethod {
+                        matcher {
+                            anyOf {
+                                statusClass.declaredMethods.filter {
+                                    it.returnType == Boolean::class.javaPrimitiveType
+                                }.forEach {
+                                    match {
+                                        addInvoke(DexSignUtil.getMethodDescriptor(it))
+                                    }
+                                }
                             }
                         }
+                    }?.singleOrNull {
+                        it.paramCount > 0 && !Modifier.isStatic(it.modifiers) && it.paramTypeNames[0] == "android.view.View"
                     }
-                }
-            }.single {
-                it.paramCount > 0 && !Modifier.isStatic(it.modifiers) && it.paramTypeNames[0] == "android.view.View"
-            }.getMethodInstance(classLoader)
+                }?.getMethodInstance(classLoader)
+                ?: throw NoSuchMethodException("StatusProfile method not found")
         }
     }
 
@@ -2492,19 +2696,67 @@ object Unobfuscator {
     @JvmStatic
     fun loadAddOptionSearchBarMethod(classLoader: ClassLoader): Method {
         return UnobfuscatorCache.getInstance().getMethod(classLoader) {
-            val classData = bridge.getClassData(WppCore.homeActivityClass)
-                ?: return@getMethod null
-            val methodData = classData.findMethod {
-                matcher {
-                    addUsingNumber(Utils.getID("menuitem_search", "id"))
-                    addUsingNumber(200)
-                    paramCount(1)
-                    addParamType(Menu::class.java)
-                }
-            }
-            if (methodData.isEmpty()) throw NoSuchMethodError("MenuSearch not found in HomeActivity")
-            methodData[0].getMethodInstance(classLoader)
+            val chain = homeActivityClassDataChain(WppCore.homeActivityClass)
+            if (chain.isEmpty()) throw NoSuchMethodError("HomeActivity class data not found")
+            val searchId = Utils.getID("menuitem_search", "id")
+            val methodData = chain.firstNotNullOfOrNull { classData ->
+                classData.findMethod {
+                    matcher {
+                        addUsingNumber(searchId)
+                        addUsingNumber(200)
+                        paramCount(1)
+                        addParamType(Menu::class.java)
+                    }
+                }.firstOrNull()
+            } ?: throw NoSuchMethodError("MenuSearch not found in HomeActivity")
+            methodData.getMethodInstance(classLoader)
         }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadBottomNavigationViewClass(classLoader: ClassLoader): Class<*> {
+        return UnobfuscatorCache.getInstance().getClass(classLoader) {
+            val clazz = bridge.findClass {
+                matcher {
+                    anyOf {
+                        match {
+                            className(".BottomNavigationView", StringMatchType.EndsWith)
+                        }
+                        match {
+                            className(".WDSBottomBar", StringMatchType.EndsWith)
+                        }
+                    }
+                }
+            }.first().getInstance(classLoader)
+            if (clazz.simpleName == "WDSBottomBar") clazz.superclass else clazz
+        }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadStanzaWriterMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            val protocolTreeNodeClass = loadProtocolTreeNodeClass(classLoader)
+            bridge.findMethod {
+                matcher {
+                    paramTypes(protocolTreeNodeClass.name, "int")
+                    returnType = "void"
+                    addInvoke("Ljava/util/zip/DeflaterOutputStream;-><init>(Ljava/io/OutputStream;)V")
+                }
+            }.singleOrNull()?.getMethodInstance(classLoader)
+                ?: throw Exception("Stanza writer method not found")
+        }
+    }
+
+    private fun homeActivityClassDataChain(homeActivityClass: Class<*>): List<ClassData> {
+        val chain = ArrayList<ClassData>()
+        var current = bridge.getClassData(homeActivityClass.name)
+        while (current != null && current.name.startsWith("com.whatsapp.")) {
+            chain.add(current)
+            current = current.superClass
+        }
+        return chain
     }
 
     @Throws(Exception::class)
@@ -2595,9 +2847,8 @@ object Unobfuscator {
                 }
             }.firstOrNull() ?: throw Exception("ConversationsFragment A00 method not found")
 
-            val dimenId = methodData.usingNumbers.map { n ->
-                java.lang.Float.floatToIntBits(n.toFloat())
-            }.firstOrNull { idInt ->
+            val dimenId = methodData.usingNumbers.filter { it.bitWidth == 32 }.map { it.intValue() }
+                .firstOrNull { idInt ->
                 (idInt ushr 24) == 0x7F && ((idInt ushr 16) and 0xFF) == 0x07
             } ?: throw Exception("Filter dimen ID not found in ConversationsFragment")
             dimenId
@@ -2679,6 +2930,35 @@ object Unobfuscator {
     @JvmStatic
     fun loadLockedChatsMethod(classLoader: ClassLoader): Method {
         return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            // The locked chats screen reads its list from a no-arg ArrayList getter on the chats
+            // manager. R8 merges the fragment's A2l into its superclass, so scan both.
+            val lockedFragment = bridge.getClassData(
+                "com.whatsapp.conversation.conversationslist.LockedConversationsFragment"
+            )
+            if (lockedFragment != null) {
+                val candidates = listOfNotNull(lockedFragment, lockedFragment.superClass)
+                    .flatMap { it.methods }
+                    .filter { it.paramCount == 0 && it.returnType?.name == List::class.java.name }
+                    .flatMap { it.invokes }
+                    .filter {
+                        it.isMethod && !Modifier.isStatic(it.modifiers) && it.paramCount == 0 &&
+                                it.returnType?.name == ArrayList::class.java.name
+                    }
+                    .distinctBy { it.descriptor }
+                val notificationInvokes = bridge.getMethodData(loadNotificationMethod(classLoader))
+                    ?.invokes?.map { it.descriptor }?.toSet().orEmpty()
+                val reachable = candidates.filter { it.descriptor in notificationInvokes }
+                // The locked getter filters the chat list through a (Jid) -> boolean check
+                val locked = reachable.firstOrNull { candidate ->
+                    candidate.invokes.any {
+                        it.isMethod && it.paramCount == 1 && it.returnType?.name == "boolean"
+                    }
+                }
+                if (locked != null) {
+                    return@getMethod locked.getMethodInstance(classLoader)
+                }
+            }
+
             val classData = bridge.findClass {
                 matcher {
                     addUsingString("conversationsmgr/replacecontact")
@@ -2694,6 +2974,120 @@ object Unobfuscator {
             }
             throw RuntimeException("LockedChats method not found")
         }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadCallsHistoryBuildMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            val viewModelClass = findFirstClassUsingName(
+                classLoader,
+                StringMatchType.EndsWith,
+                "CallsHistoryFragmentViewModel"
+            )
+            val method = try {
+                viewModelClass.declaredMethods.firstOrNull { candidate ->
+                    Modifier.isStatic(candidate.modifiers) &&
+                            candidate.returnType == Void.TYPE &&
+                            candidate.parameterCount == 5 &&
+                            candidate.parameterTypes[0] == viewModelClass &&
+                            ArrayList::class.java.isAssignableFrom(candidate.parameterTypes[1]) &&
+                            LinkedHashMap::class.java.isAssignableFrom(candidate.parameterTypes[2]) &&
+                            List::class.java.isAssignableFrom(candidate.parameterTypes[3]) &&
+                            List::class.java.isAssignableFrom(candidate.parameterTypes[4])
+                }
+            } catch (_: LinkageError) {
+                null
+            }
+            method?.apply { isAccessible = true }
+                ?: throw NoSuchMethodException("Calls history build method not found")
+        }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadStatusPlaybackNavigationMethod(loader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(loader) {
+            val activityClass = findFirstClassUsingName(
+                loader,
+                StringMatchType.EndsWith,
+                "StatusPlaybackActivity"
+            )
+            val navigationMethod = findFirstMethodUsingStrings(
+                loader,
+                StringMatchType.Contains,
+                "StatusPlaybackActivity/archive end-of-chain reached, finishing"
+            )?.takeIf { it.declaringClass == activityClass }
+                ?: try {
+                    activityClass.declaredMethods.firstOrNull { method ->
+                        !Modifier.isStatic(method.modifiers) &&
+                                method.returnType == Boolean::class.javaPrimitiveType &&
+                                method.parameterCount == 4 &&
+                                method.parameterTypes[0] == String::class.java &&
+                                method.parameterTypes[1] == Int::class.javaPrimitiveType &&
+                                method.parameterTypes[2] == Int::class.javaPrimitiveType &&
+                                method.parameterTypes[3] == Boolean::class.javaPrimitiveType
+                    }
+                } catch (_: LinkageError) {
+                    null
+                }
+            navigationMethod
+                ?: throw NoSuchMethodException("StatusPlayback navigation method not found")
+        }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadStatusPlaybackCarouselField(loader: ClassLoader): Field {
+        return UnobfuscatorCache.getInstance().getField(loader) {
+            val activityClass = findFirstClassUsingName(
+                loader,
+                StringMatchType.EndsWith,
+                "StatusPlaybackActivity"
+            )
+            val navigationMethodData =
+                bridge.getMethodData(loadStatusPlaybackNavigationMethod(loader))
+                    ?: throw NoSuchFieldException("StatusPlayback navigation data not found")
+
+            for (usingField in navigationMethodData.usingFields) {
+                val fieldData = usingField.field
+                if (fieldData.declaredClassName != activityClass.name) continue
+                val field =
+                    runCatching { fieldData.getFieldInstance(loader) }.getOrNull() ?: continue
+                val typeFields = try {
+                    field.type.declaredFields
+                } catch (_: LinkageError) {
+                    emptyArray()
+                }
+                val hasList = typeFields.any { List::class.java.isAssignableFrom(it.type) }
+                val hasMap = typeFields.any { Map::class.java.isAssignableFrom(it.type) }
+                if (hasList && hasMap) return@getField field
+            }
+            throw NoSuchFieldException("StatusPlayback carousel field not found")
+        }
+    }
+
+    @JvmStatic
+    fun loadStatusPlaybackCarouselItemKeyMethod(loader: ClassLoader): Method? {
+        return runCatching {
+            UnobfuscatorCache.getInstance().getMethod(loader) {
+                val carouselClass = loadStatusPlaybackCarouselField(loader).type
+                val indexOfMethod = carouselClass.declaredMethods.firstOrNull {
+                    !Modifier.isStatic(it.modifiers) &&
+                            it.returnType == Int::class.javaPrimitiveType &&
+                            it.parameterTypes.contentEquals(arrayOf(String::class.java))
+                } ?: throw NoSuchMethodException("StatusPlayback carousel indexOf not found")
+                val methodData = bridge.getMethodData(indexOfMethod)
+                    ?: throw NoSuchMethodException("StatusPlayback carousel indexOf data not found")
+                methodData.invokes.firstNotNullOfOrNull { invoke ->
+                    if (invoke.paramTypeNames.isNotEmpty() ||
+                        invoke.returnTypeName != String::class.java.name
+                    ) return@firstNotNullOfOrNull null
+                    runCatching { invoke.getMethodInstance(loader) }.getOrNull()
+                        ?.takeIf { it.declaringClass.isInterface }
+                } ?: throw NoSuchMethodException("StatusPlayback carousel item key not found")
+            }
+        }.getOrNull()
     }
 
     @Throws(Exception::class)
@@ -2726,6 +3120,26 @@ object Unobfuscator {
                     addUsingNumber(8726)
                     paramCount(1)
                     addParamType(Any::class.java)
+                }
+            }.ifEmpty {
+                bridge.findMethod {
+                    matcher {
+                        usingNumbers(8726)
+                        paramCount = 1
+                        usingStrings(
+                            listOf("ContactPickerFragment/onContactsLoaded"),
+                            StringMatchType.Contains
+                        )
+                    }
+                }
+            }.ifEmpty {
+                bridge.findMethod {
+                    searchPackages("com.whatsapp.contact.ui.picker")
+                    matcher {
+                        declaredClass("com.whatsapp.contact.ui.picker.ContactPickerFragment")
+                        usingNumbers(8726)
+                        paramCount = 1
+                    }
                 }
             }
             if (methods.isEmpty()) return@getMethod null
@@ -2833,36 +3247,69 @@ object Unobfuscator {
     @JvmStatic
     fun loadSharedPreferencesClasses(classLoader: ClassLoader): Array<Class<*>>? {
         return UnobfuscatorCache.getInstance().getClasses(classLoader) {
-            val classesData = bridge.findClass {
-                matcher {
-                    addInterface(SharedPreferences::class.java.name)
+            val descendants = LinkedHashMap<String, ClassData>()
+            val pending = ArrayDeque(listOf(SharedPreferences::class.java.name))
+            while (pending.isNotEmpty()) {
+                val parent = pending.removeFirst()
+                val children = bridge.findClass {
+                    matcher { interfaces { add(parent) } }
+                } + bridge.findClass {
+                    matcher { superClass = parent }
                 }
+                children.filter { descendants.putIfAbsent(it.name, it) == null }
+                    .forEach { pending += it.name }
             }
-            if (classesData.isEmpty()) return@getClasses null
-            classesData.stream().map { classData -> convertRealClass(classData, classLoader) }
-                .toArray { length -> arrayOfNulls<Class<*>>(length) }
+            if (descendants.isEmpty()) return@getClasses null
+            descendants.values.filter { !Modifier.isAbstract(it.modifiers) }
+                .mapNotNull { classData -> convertRealClass(classData, classLoader) }
+                .toTypedArray()
         }
     }
 
-    @Throws(Exception::class)
-    @JvmStatic
-    fun loadPinnedFilterMethod(classLoader: ClassLoader): Method {
+    fun loadPinnedChatsPremiumUpsellMethod(classLoader: ClassLoader): Method {
         return UnobfuscatorCache.getInstance().getMethod(classLoader) {
-            val method = findFirstMethodUsingStrings(
+            bridge.findMethod {
+                matcher {
+                    returnType(Boolean::class.javaPrimitiveType!!)
+                    paramCount(2)
+                    addUsingNumber(3)
+                    modifiers(Modifier.STATIC)
+                }
+            }.filter {
+                val types = it.paramTypeNames
+                types[0] == it.className && types[1] == Set::class.java.name
+            }.singleOrNull()?.getMethodInstance(classLoader)
+                ?: throw NoSuchMethodException("PinnedChatsPremiumUpsell method not found")
+        }
+    }
+
+    fun loadPinChatHandlerMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            findFirstMethodUsingStrings(
                 classLoader,
                 StringMatchType.Contains,
-                "pinSelectedJids"
-            ) ?: return@getMethod null
-            val methodData = bridge.getMethodData(method)
-            for (invoke in methodData!!.invokes) {
-                if (!invoke.isMethod) continue
-                val methodInstance = invoke.getMethodInstance(classLoader)
-                if (!Set::class.java.isAssignableFrom(methodInstance.returnType)) continue
-                if (methodInstance.parameterCount == 2 && methodInstance.parameterTypes[0] == Iterable::class.java && methodInstance.parameterTypes[1] == Set::class.java) {
-                    return@getMethod methodInstance
-                }
-            }
-            throw NoSuchMethodException("PinnedLinkedHashMethod not found")
+                "PinChatHandler/setArchive"
+            ) ?: throw NoSuchMethodException("PinChatHandler method not found")
+        }
+    }
+
+    fun loadPinSelectedChatsMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            findFirstMethodUsingStrings(
+                classLoader,
+                StringMatchType.Contains,
+                "ConversationPinHelper/pinSelectedJids max="
+            ) ?: throw NoSuchMethodException("PinSelectedChats method not found")
+        }
+    }
+
+    fun loadTrimExcessPinnedChatsMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            findFirstMethodUsingStrings(
+                classLoader,
+                StringMatchType.Contains,
+                "ConversationPinHelper/trimExcessPinnedChats"
+            ) ?: throw NoSuchMethodException("TrimExcessPinnedChats method not found")
         }
     }
 
@@ -3042,9 +3489,12 @@ object Unobfuscator {
                 StringMatchType.Contains,
                 "RevokeStatusManager/failed"
             )
-            ReflectionUtils.findMethodUsingFilter(clazz) { method ->
-                method.parameterCount > 0 && fStatusKeyClass.isAssignableFrom(method.parameterTypes[0])
-            }!!
+            // Older versions compile the store result enum into boxed Integer constants.
+            clazz!!.declaredMethods.firstOrNull { method ->
+                (Enum::class.java.isAssignableFrom(method.returnType) ||
+                    method.returnType == Int::class.javaObjectType) &&
+                    method.parameterTypes.count { fStatusKeyClass.isAssignableFrom(it) } >= 2
+            } ?: throw Exception("Revoke FStatus method not found")
         }
     }
 
@@ -3065,11 +3515,34 @@ object Unobfuscator {
     @JvmStatic
     fun loadFStatusToFMessage(classLoader: ClassLoader): Method {
         return UnobfuscatorCache.getInstance().getMethod(classLoader) {
-            findFirstMethodUsingStrings(
-                classLoader,
-                StringMatchType.Contains,
-                "mapFStatusToFMessageForForwarding"
-            )!!
+            bridge.findMethod {
+                matcher {
+                    addUsingString("mapFStatusToFMessageForForwarding", StringMatchType.Contains)
+                }
+            }.filter { it.isMethod }
+                .map { it.getMethodInstance(classLoader) }
+                .firstOrNull { !it.isSynthetic }
+                ?: throw Exception("FStatusToFMessage method not found")
+        }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
+    fun loadStatusPlaybackReplyContainerViewMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            val holderClass = loadStatusPlaybackReplyContainer(classLoader).returnType
+            bridge.getClassData(holderClass.name)?.findMethod {
+                matcher {
+                    paramCount(0)
+                    returnType(View::class.java)
+                    usingStrings(listOf("ViewStubHolder.getView()"), StringMatchType.Contains)
+                }
+            }?.firstOrNull()?.getMethodInstance(classLoader)?.let { return@getMethod it }
+
+            holderClass.declaredMethods.firstOrNull {
+                it.name == "A01" && it.parameterCount == 0 &&
+                        View::class.java.isAssignableFrom(it.returnType)
+            } ?: throw NoSuchMethodException("StatusPlaybackReplyContainer getView not found")
         }
     }
 
@@ -3274,9 +3747,11 @@ object Unobfuscator {
                 "TextStatusComposerFragment"
             )
             ReflectionUtils.findMethodUsingFilter(clazz) { method ->
-                method.parameterCount == 2 &&
-                        method.parameterTypes[0] === Bundle::class.java &&
-                        method.parameterTypes[1] === View::class.java
+                method.parameterCount == 2 && (
+                        (method.parameterTypes[0] === View::class.java &&
+                                method.parameterTypes[1] === Bundle::class.java) ||
+                                (method.parameterTypes[0] === Bundle::class.java &&
+                                        method.parameterTypes[1] === View::class.java))
             }
         }
     }
@@ -3307,12 +3782,51 @@ object Unobfuscator {
         return UnobfuscatorCache.getInstance().getMethod(classLoader) {
             bridge.findMethod {
                 matcher {
-                    paramTypes(
-                        Bitmap::class.java,
-                        ColorFilter::class.java,
-                        Float::class.javaPrimitiveType
-                    )
+                    paramCount(3, 6)
                     returnType(Bitmap::class.java)
+                    usingNumbers(0.70710678118)
+                }
+            }.single {
+                val types = it.paramTypeNames
+                types.size in 3..6 &&
+                        types.first() == Bitmap::class.java.name &&
+                        types[1] == ColorFilter::class.java.name &&
+                        types.last() == "float"
+            }.getMethodInstance(classLoader)
+        }
+    }
+
+    fun loadStickerStyleConstructor(classLoader: ClassLoader): Constructor<*> {
+        return UnobfuscatorCache.getInstance().getConstructor(classLoader) {
+            val styleClass = findFirstClassUsingStrings(
+                classLoader,
+                StringMatchType.Contains,
+                "StickerStyle(isOutlineEnabled="
+            ) ?: throw RuntimeException("StickerStyle class not found")
+            styleClass.declaredConstructors.single { constructor ->
+                val types = constructor.parameterTypes
+                types.size == 5 &&
+                        types[0].isEnum &&
+                        types[1] == Int::class.javaPrimitiveType &&
+                        types.drop(2).all { it == Boolean::class.javaPrimitiveType }
+            }
+        }
+    }
+
+    fun loadStickerVideoFrameMethod(classLoader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(classLoader) {
+            bridge.findMethod {
+                matcher {
+                    returnType(Bitmap::class.java)
+                    paramTypes(
+                        Bitmap::class.java.name,
+                        Bitmap::class.java.name,
+                        Rect::class.java.name,
+                        Int::class.java.name,
+                        Int::class.java.name,
+                        Int::class.java.name,
+                        Boolean::class.java.name
+                    )
                 }
             }.single().getMethodInstance(classLoader)
         }
@@ -3428,7 +3942,18 @@ object Unobfuscator {
                 classLoader,
                 StringMatchType.Contains,
                 "outgoing-launch/cm-null-contact"
-            ) ?: throw NoSuchMethodException("StartOutgoingCall method not found")
+            ) ?: bridge.findMethod {
+                matcher {
+                    paramTypes(
+                        Context::class.java.name,
+                        loadWaContactClass(classLoader).name,
+                        Int::class.java.name,
+                        Boolean::class.java.name
+                    )
+                    addInvoke("Ljava/util/Collections;->singletonList(Ljava/lang/Object;)Ljava/util/List;")
+                }
+            }.firstOrNull()?.getMethodInstance(classLoader)
+            ?: throw NoSuchMethodException("StartOutgoingCall method not found")
         }
     }
 
@@ -3443,5 +3968,36 @@ object Unobfuscator {
             )
                 ?: throw RuntimeException("ReadReceiptMethod method not found")
         }
+    }
+
+    private class BridgeRouter {
+
+        private fun <T> execute(callable: DexKitManager.BridgeCallable<T>): T {
+            return try {
+                withDexKitBridge(callable)
+            } catch (e: RuntimeException) {
+                throw e
+            } catch (e: Exception) {
+                throw RuntimeException(e)
+            }
+        }
+
+        fun findMethod(query: FindMethod.() -> Unit): MethodDataList =
+            execute { it.findMethod(FindMethod.create().apply(query)) }
+
+        fun findClass(query: FindClass.() -> Unit): ClassDataList =
+            execute { it.findClass(FindClass.create().apply(query)) }
+
+        fun getClassData(clazz: Class<*>): ClassData? = execute { it.getClassData(clazz) }
+
+        fun getClassData(className: String): ClassData? = execute { it.getClassData(className) }
+
+        fun getMethodData(method: Method): MethodData? = execute { it.getMethodData(method) }
+
+        fun getMethodData(constructor: Constructor<*>): MethodData? =
+            execute { it.getMethodData(constructor) }
+
+        fun getMethodData(methodDescriptor: String): MethodData? =
+            execute { it.getMethodData(methodDescriptor) }
     }
 }

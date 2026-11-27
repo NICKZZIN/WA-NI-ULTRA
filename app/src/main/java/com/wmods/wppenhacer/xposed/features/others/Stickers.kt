@@ -7,9 +7,10 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.xposed.core.Feature
+import com.wmods.wppenhacer.xposed.core.ViewHookDispatcher
 import com.wmods.wppenhacer.xposed.core.components.AlertDialogWpp
 import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
 import com.wmods.wppenhacer.xposed.utils.Utils
@@ -20,16 +21,11 @@ class Stickers(classLoader: ClassLoader, preferences: SharedPreferences) :
 
     override fun doHook() {
 
-        if (!xprefs.getBoolean("alertsticker", false)) return
-        View::class.java.resolve().firstMethod {
-            name = "onAttachedToWindow"
-            superclass()
-            emptyParameters()
-        }.hook {
-            after {
-                val view = instance as View
-                if (view.id != Utils.getID("stickerContainer", "id")) return@after
-                if (view.tag == "wae_hooked") return@after
+        if (xprefs.getBoolean("alertsticker", false)) {
+            val stickerContainerId = Utils.getID("stickerContainer", "id")
+            ViewHookDispatcher.onAttachedToWindow(this) { view ->
+                if (view.id != stickerContainerId) return@onAttachedToWindow
+                if (view.tag == "wae_hooked") return@onAttachedToWindow
                 view.tag = "wae_hooked"
                 view.setTouchClickAndLongClickListener(
                     onClick = {
@@ -42,14 +38,43 @@ class Stickers(classLoader: ClassLoader, preferences: SharedPreferences) :
             }
         }
         if (xprefs.getBoolean("remove_sticker_white_outline", false)) {
-            val stickerColoredOutline = Unobfuscator.loadStickerColoredOutline(classLoader)
-            stickerColoredOutline.hook {
+            hookRemoveOutline()
+        }
+    }
+
+    private fun hookRemoveOutline() {
+        hookOutlineStep("colored outline") {
+            Unobfuscator.loadStickerColoredOutline(classLoader).hook {
                 before {
                     val source = args[0] as Bitmap
                     val safeConfig = source.config ?: Bitmap.Config.ARGB_8888
                     result = source.copy(safeConfig, true)
                 }
             }
+        }
+
+        hookOutlineStep("sticker style") {
+            Unobfuscator.loadStickerStyleConstructor(classLoader).hook {
+                before {
+                    args[STYLE_ARG_OUTLINE_ENABLED] = false
+                }
+            }
+        }
+
+        hookOutlineStep("video frame") {
+            Unobfuscator.loadStickerVideoFrameMethod(classLoader).hook {
+                before {
+                    args[FRAME_ARG_DRAW_OUTLINE] = false
+                }
+            }
+        }
+    }
+
+    private fun hookOutlineStep(name: String, hook: () -> Unit) {
+        try {
+            hook()
+        } catch (e: Throwable) {
+            logDebug("Sticker outline may stay visible, failed to hook $name", e)
         }
     }
 
@@ -95,5 +120,10 @@ class Stickers(classLoader: ClassLoader, preferences: SharedPreferences) :
 
     override fun getPluginName(): String {
         return "Stickers"
+    }
+
+    private companion object {
+        const val STYLE_ARG_OUTLINE_ENABLED = 2
+        const val FRAME_ARG_DRAW_OUTLINE = 6
     }
 }

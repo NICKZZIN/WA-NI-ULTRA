@@ -1,14 +1,17 @@
 [NEW]
-* Added support for WA/WB 2.26.39.xx and 2.26.40.xx
-* New option to turn off the document scanner when picking documents. Helps if WhatsApp closes by itself when you open it
-* A message now appears when saving or restoring your settings if no file manager is found on your device
-
-[IMPROVED]
-* Module settings are now loaded faster and more reliably inside WhatsApp, and changes made in the module apply as soon as you save them
+* Added support for WhatsApp and WhatsApp Business 2.26.46.xx
+* Voice note speed slider: long press the speed badge of a voice note to choose any speed
+* High quality voice notes, recorded at 48 kHz with a higher bitrate
+* Option to choose the noise suppression level of voice notes
+* Option to download video notes
+* The status viewer now shows how long the status has left before it expires
+* WhatsApp's own app themes are turned off while the custom colors are on, and come back when they are turned off
 
 [FIXED]
-* Fixed the Contacts and Groups chat filters not working correctly on some WhatsApp versions
-* Fixed the full-size profile photo not loading on some devices
-* Fixed the video quality option not being applied correctly on some devices
-* Fixed the app sometimes showing the module as inactive even when it was working
-* Update MinorFixes (thanks to WZSE) to fix problem in Documents
+* Fixed WhatsApp crashing on launch with separated groups
+* Fixed the props (feature flags) not being applied on newer WhatsApp versions
+* Fixed videos with some AAC audio formats failing to send
+* Fixed "Disable profile photo in status" not loading on newer WhatsApp versions
+* Fixed the open chat not being detected in the tablet layout
+* Fixed the plugin loading notification getting stuck when WhatsApp was closed while loading
+* Fixed the system bars flickering black over the Home wallpaper on some devices

@@ -13,6 +13,8 @@ import android.util.LruCache
 import android.widget.Toast
 import androidx.core.content.edit
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
+import com.highcapable.yukihookapi.extension.kavaref.hookAll
 import com.highcapable.yukihookapi.hook.param.PackageParam
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.views.dialog.BottomDialogWpp
@@ -33,6 +35,7 @@ import org.luckypray.dexkit.query.enums.StringMatchType
 import java.io.File
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
@@ -46,6 +49,7 @@ object WppCore {
     @JvmField
     internal var mCurrentActivity: Activity? = null
 
+    private val DEVICE_SUFFIX_REGEX = Regex("\\.[\\d:]+@")
     private var mGenJidMethod: Method? = null
     private var bottomDialog: Class<*>? = null
     private var _privPrefs: SharedPreferences? = null
@@ -196,7 +200,7 @@ object WppCore {
         try {
             var rawString = ReflectionUtils.callMethod(lid, "getRawString") as? String
             if (rawString == null || !rawString.contains("@lid")) return lid
-            rawString = rawString.replaceFirst("\\.[\\d:]+@".toRegex(), "@")
+            rawString = rawString.replaceFirst(DEVICE_SUFFIX_REGEX, "@")
             val newUser = createUserJid(rawString)
             val result = ReflectionUtils.callMethod(convertLidToJid, mWaJidMapRepository, newUser)
             return result ?: lid
@@ -212,7 +216,7 @@ object WppCore {
         try {
             var rawString = ReflectionUtils.callMethod(userJid, "getRawString") as? String
             if (rawString == null || rawString.contains("@lid")) return userJid
-            rawString = rawString.replaceFirst("\\.[\\d:]+@".toRegex(), "@")
+            rawString = rawString.replaceFirst(DEVICE_SUFFIX_REGEX, "@")
             val newUser = createUserJid(rawString)
             val result = ReflectionUtils.callMethod(convertJidToLid, mWaJidMapRepository, newUser)
             return result ?: userJid
@@ -500,10 +504,16 @@ object WppCore {
             if (conversation.javaClass.simpleName == "HomeActivity") {
                 val convFragmentMethod =
                     Unobfuscator.loadHomeConversationFragmentMethod(conversation.classLoader)
-                val convFragment = convFragmentMethod.invoke(null, conversation)
-                val convField =
-                    Unobfuscator.loadAntiRevokeConvFragmentField(conversation.classLoader)
-                conversationDelegate = convField.get(convFragment)
+                val convFragment = if (Modifier.isStatic(convFragmentMethod.modifiers)) {
+                    convFragmentMethod.invoke(null, conversation)
+                } else {
+                    convFragmentMethod.invoke(conversation)
+                }
+                conversationDelegate =
+                    Unobfuscator.loadHomeConversationDelegateFields(conversation.classLoader)
+                        .fold(convFragment) { holder, field ->
+                            holder?.let { field.apply { isAccessible = true }.get(it) }
+                        }
             }
             FMessageWpp.UserJid(conversationJidField?.get(conversationDelegate))
         } catch (_: Exception) {

@@ -23,7 +23,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.highcapable.yukihookapi.YukiHookAPI
+import com.highcapable.yukihookapi.YukiHook
 import com.wmods.wppenhacer.App
 import com.wmods.wppenhacer.BuildConfig
 import com.wmods.wppenhacer.R
@@ -48,7 +48,9 @@ import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class HomeFragment : BaseFragment() {
 
@@ -81,6 +83,10 @@ class HomeFragment : BaseFragment() {
         _binding = FragmentHomeBinding.inflate(inflater, container, false)
 
         checkStateWpp(requireActivity())
+        // libxposed binds the framework service asynchronously, refresh once it connects.
+        YukiHook.Status.observeFrameworkService(viewLifecycleOwner.lifecycle) {
+            if (_binding != null) updateModuleStatus()
+        }
 
         binding.rebootBtn.setOnClickListener { view ->
             animateClick(view)
@@ -268,7 +274,7 @@ class HomeFragment : BaseFragment() {
         val formattedDate = dateFormat.format(Date())
         try {
             FilePicker.fileSalve.launch("wpp_enhacer_configs_$formattedDate.json")
-        } catch (e: ActivityNotFoundException) {
+        } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, R.string.no_file_picker, Toast.LENGTH_LONG).show()
         }
     }
@@ -299,7 +305,7 @@ class HomeFragment : BaseFragment() {
         }
         val text = raw.toString()
         return when (type?.lowercase()) {
-            "boolean" -> if (raw is Boolean) raw else text.toBooleanStrictOrNull()
+            "boolean" -> raw as? Boolean ?: text.toBooleanStrictOrNull()
             "integer", "int" -> (raw as? Number)?.toInt() ?: text.toIntOrNull()
             "long" -> (raw as? Number)?.toLong() ?: text.toLongOrNull()
             "float", "double" -> (raw as? Number)?.toFloat() ?: text.toFloatOrNull()
@@ -357,17 +363,18 @@ class HomeFragment : BaseFragment() {
         }
         try {
             FilePicker.fileCapture.launch(arrayOf("application/json"))
-        } catch (e: ActivityNotFoundException) {
+        } catch (_: ActivityNotFoundException) {
             Toast.makeText(context, R.string.no_file_picker, Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun checkStateWpp(activity: FragmentActivity) {
-        if (YukiHookAPI.Status.isXposedModuleActive) {
+    private fun updateModuleStatus() {
+        if (YukiHook.Status.isModuleActive) {
             binding.statusIcon.setImageResource(R.drawable.ic_round_check_circle_24)
             binding.statusTitle.setText(R.string.module_enabled)
             binding.statusSummary.text =
                 String.format(getString(R.string.version_s), BuildConfig.VERSION_NAME)
+            binding.statusSummary.visibility = View.VISIBLE
             binding.status.getChildAt(0).setBackgroundResource(R.drawable.gradient_success)
         } else {
             binding.statusIcon.setImageResource(R.drawable.ic_round_error_outline_24)
@@ -375,6 +382,10 @@ class HomeFragment : BaseFragment() {
             binding.status.getChildAt(0).setBackgroundResource(R.drawable.gradient_error)
             binding.statusSummary.visibility = View.GONE
         }
+    }
+
+    private fun checkStateWpp(activity: FragmentActivity) {
+        updateModuleStatus()
         if (isInstalled(FeatureLoader.PACKAGE_WPP) && App.isOriginalPackage) {
             disableWpp()
         } else {
@@ -452,6 +463,7 @@ class HomeFragment : BaseFragment() {
         )
     }
 
+    @Suppress("SameParameterValue")
     private fun isInstalled(packageWpp: String): Boolean {
         return try {
             App.instance.packageManager.getPackageInfo(packageWpp, 0)
@@ -505,7 +517,7 @@ class HomeFragment : BaseFragment() {
                     .build()
 
                 val request = Request.Builder()
-                    .url("https://api.github.com/repos/Dev4Mod/WaEnhancer/releases/latest")
+                    .url("https://api.github.com/repos/NICKZZIN/WA-NI-ULTRA/releases/latest")
                     .build()
 
                 client.newCall(request).execute().use { response ->
@@ -588,11 +600,43 @@ class HomeFragment : BaseFragment() {
             .show()
 
         val handler = Handler(Looper.getMainLooper())
-        val queue = ArrayList<RootDiagnostics.LogEntry>()
+        val queue = ConcurrentLinkedQueue<RootDiagnostics.LogEntry>()
+        val finished = AtomicBoolean(false)
 
-        RootDiagnostics.runDiagnostics(context) { entry ->
+        val hmaBlockMessage = getString(R.string.diag_hma_disable)
+        val denylistBlockMessage = getString(R.string.diag_denylist_disable)
+        RootDiagnostics.runDiagnostics(context, { entry ->
             if (!isAdded) return@runDiagnostics
             queue.add(entry)
+            if (entry.message == hmaBlockMessage) {
+                handler.post { dialogBinding.fixHmaButton.visibility = View.VISIBLE }
+            } else if (entry.message == denylistBlockMessage) {
+                handler.post { dialogBinding.fixDenylistButton.visibility = View.VISIBLE }
+            }
+        }) { finished.set(true) }
+
+        dialogBinding.fixDenylistButton.setOnClickListener {
+            MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.diag_denylist_fix_confirm_title)
+                .setMessage(R.string.diag_denylist_fix_confirm_message)
+                .setPositiveButton(R.string.diag_hma_fix_confirm) { _, _ ->
+                    dialogBinding.fixDenylistButton.isEnabled = false
+                    fixMagiskDenylist(context, dialogBinding.fixDenylistButton)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+
+        dialogBinding.fixHmaButton.setOnClickListener {
+            MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.diag_hma_fix_confirm_title)
+                .setMessage(R.string.diag_hma_fix_confirm_message)
+                .setPositiveButton(R.string.diag_hma_fix_confirm) { _, _ ->
+                    dialogBinding.fixHmaButton.isEnabled = false
+                    fixHideMyAppList(context, dialog, dialogBinding.fixHmaButton)
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
         }
 
         val poller = object : Runnable {
@@ -601,10 +645,13 @@ class HomeFragment : BaseFragment() {
             override fun run() {
                 if (!isAdded || _binding == null || !dialog.isShowing) return
 
-                if (queue.isNotEmpty()) {
+                val entry = queue.poll()
+                if (entry != null) {
                     emptyCycles = 0
-                    logAdapter.add(queue.removeAt(0))
+                    logAdapter.add(entry)
                     dialogBinding.logRecycler.smoothScrollToPosition(logAdapter.itemCount - 1)
+                    handler.postDelayed(this, 120)
+                } else if (!finished.get()) {
                     handler.postDelayed(this, 120)
                 } else if (emptyCycles < 50) {
                     emptyCycles++
@@ -613,6 +660,60 @@ class HomeFragment : BaseFragment() {
             }
         }
         handler.postDelayed(poller, 120)
+    }
+
+    private fun fixHideMyAppList(
+        context: Context,
+        diagnosticsDialog: androidx.appcompat.app.AlertDialog,
+        button: View
+    ) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = RootDiagnostics.fixHideMyAppList(context) { }
+            withContext(Dispatchers.Main) {
+                if (_binding == null || !isAdded) return@withContext
+                button.isEnabled = true
+                when (result) {
+                    RootDiagnostics.FixResult.FIXED -> {
+                        diagnosticsDialog.dismiss()
+                        MaterialAlertDialogBuilder(context)
+                            .setTitle(R.string.diag_hma_fix_reboot_title)
+                            .setMessage(R.string.diag_hma_fix_reboot_message)
+                            .setCancelable(false)
+                            .setPositiveButton(R.string.diag_hma_fix_reboot_now) { _, _ ->
+                                RootDiagnostics.rebootDevice()
+                            }
+                            .setNegativeButton(R.string.diag_hma_fix_later, null)
+                            .show()
+                    }
+
+                    RootDiagnostics.FixResult.NOTHING_TO_FIX ->
+                        Toast.makeText(context, R.string.diag_hma_fix_nothing, Toast.LENGTH_LONG).show()
+
+                    RootDiagnostics.FixResult.FAILED ->
+                        Toast.makeText(context, R.string.diag_hma_fix_failed, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun fixMagiskDenylist(context: Context, button: View) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = RootDiagnostics.fixMagiskDenylist(context) { }
+            withContext(Dispatchers.Main) {
+                if (_binding == null || !isAdded) return@withContext
+                val message = when (result) {
+                    RootDiagnostics.FixResult.FIXED -> R.string.diag_denylist_fix_done
+                    RootDiagnostics.FixResult.NOTHING_TO_FIX -> R.string.diag_denylist_fix_nothing
+                    RootDiagnostics.FixResult.FAILED -> R.string.diag_denylist_fix_failed
+                }
+                if (result == RootDiagnostics.FixResult.FAILED) {
+                    button.isEnabled = true
+                } else {
+                    button.visibility = View.GONE
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     override fun onDestroyView() {

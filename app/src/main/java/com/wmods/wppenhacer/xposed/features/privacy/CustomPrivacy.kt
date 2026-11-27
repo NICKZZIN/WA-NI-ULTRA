@@ -1,5 +1,6 @@
 package com.wmods.wppenhacer.xposed.features.privacy
 
+import android.R as AndroidR
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.SharedPreferences
@@ -8,15 +9,22 @@ import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
+import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.edit
 import com.highcapable.kavaref.KavaRef.Companion.resolve
+import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.highcapable.yukihookapi.hook.param.HookParam
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.adapter.CustomPrivacyAdapter
@@ -42,15 +50,71 @@ class CustomPrivacy(
     private lateinit var groupUserJidMethod: Method
 
     companion object {
+        private const val KEY_SUFFIX = "_privacy"
+        private const val STATE_DEFAULT = 0
+        private const val STATE_ENABLED = 1
+        private const val STATE_DISABLED = 2
+
         @JvmStatic
-        fun getJSON(number: String?): JSONObject {
-            if (Utils.xprefs.getString("custom_privacy_type", "0") == "0" || TextUtils.isEmpty(
-                    number
-                )
-            ) {
-                return JSONObject()
+        fun getJSON(userJid: FMessageWpp.UserJid?): JSONObject {
+            if (Utils.xprefs.getString("custom_privacy_type", "0") == "0") return JSONObject()
+            val id = storageId(userJid) ?: return JSONObject()
+            val key = id + KEY_SUFFIX
+            val privPrefs = WppCore.getPrivPrefs()
+            if (privPrefs.contains(key)) return WppCore.getPrivJSON(key, JSONObject())
+
+            val legacyKey = legacyKeys(userJid!!).firstOrNull { it != key && privPrefs.contains(it) }
+                ?: return JSONObject()
+            val json = WppCore.getPrivJSON(legacyKey, JSONObject())
+            if (isStableId(id)) {
+                privPrefs.edit {
+                    putString(key, json.toString())
+                    remove(legacyKey)
+                }
             }
-            return WppCore.getPrivJSON("${number}_privacy", JSONObject())
+            return json
+        }
+
+        private fun storageId(userJid: FMessageWpp.UserJid?): String? {
+            if (userJid == null || userJid.isNull) return null
+            userJid.userRawString?.takeIf { it.endsWith("@lid") }?.let { return it }
+            return userJid.phoneRawString
+        }
+
+        private fun isStableId(id: String) = id.endsWith("@lid") || id.endsWith("@g.us")
+
+        private fun legacyNumber(userJid: FMessageWpp.UserJid): String? {
+            val raw = userJid.phoneRawString ?: return null
+            if (!raw.endsWith("@s.whatsapp.net") && !raw.endsWith("@g.us")) return null
+            return raw.substringBefore('@').takeIf { it.isNotEmpty() }
+        }
+
+        private fun legacyKeys(userJid: FMessageWpp.UserJid): List<String> = buildList {
+            userJid.phoneRawString?.let { add(it + KEY_SUFFIX) }
+            legacyNumber(userJid)?.let { add(it + KEY_SUFFIX) }
+        }
+
+        private fun legacyRawJid(number: String) =
+            number + if (number.contains('-') || number.length > 15) "@g.us" else "@s.whatsapp.net"
+
+        private fun migrateLegacyKeys() {
+            val privPrefs = WppCore.getPrivPrefs()
+            val moves = privPrefs.all.mapNotNull { (key, value) ->
+                if (!key.endsWith(KEY_SUFFIX) || value !is String) return@mapNotNull null
+                val number = key.removeSuffix(KEY_SUFFIX)
+                if (number.isEmpty() || number.contains('@')) return@mapNotNull null
+                val id = storageId(FMessageWpp.UserJid(legacyRawJid(number)))
+                    ?.takeIf { isStableId(it) } ?: return@mapNotNull null
+                Triple(key, id + KEY_SUFFIX, value)
+            }
+            if (moves.isEmpty()) return
+            privPrefs.edit(commit = true) {
+                for ((oldKey, newKey, value) in moves) {
+                    if (oldKey == newKey) continue
+                    if (!privPrefs.contains(newKey)) putString(newKey, value)
+                    remove(oldKey)
+                }
+            }
         }
     }
 
@@ -255,23 +319,23 @@ class CustomPrivacy(
         groupClass: Class<*>
     ) {
         val pprefs: SharedPreferences = WppCore.getPrivPrefs()
-        val maps = pprefs.all
         Utils.databaseExecutor.execute {
+            migrateLegacyKeys()
             val list = ArrayList<CustomPrivacyAdapter.Item>()
 
-            for (key in maps.keys) {
-                if (key.endsWith("_privacy")) {
-                    val number = key.replace("_privacy", "")
-                    val userJid = FMessageWpp.UserJid(
-                        number + if (number.length > 14) "@g.us" else "@s.whatsapp.net"
-                    )
+            for (key in pprefs.all.keys) {
+                if (key.endsWith(KEY_SUFFIX)) {
+                    val id = key.removeSuffix(KEY_SUFFIX)
+                    val userJid = FMessageWpp.UserJid(if (id.contains('@')) id else legacyRawJid(id))
+                    val number = legacyNumber(userJid)
 
                     var contactName = WppCore.getContactName(userJid)
-                    if (TextUtils.isEmpty(contactName)) contactName = number
+                    if (TextUtils.isEmpty(contactName)) contactName = number ?: id
 
                     val item = CustomPrivacyAdapter.Item()
                     item.name = contactName
-                    item.number = number
+                    item.isGroup = userJid.isGroup
+                    item.jid = userJid.phoneRawString ?: userJid.userRawString ?: id
                     item.key = key
                     list.add(item)
                 }
@@ -304,7 +368,7 @@ class CustomPrivacy(
         val userJid = getUserJid(activity, isChat)
         if (userJid.isNull) return
 
-        val builder = createPrivacyDialog(activity, userJid.phoneNumber!!)
+        val builder = createPrivacyDialog(activity, userJid)
         builder.show()
     }
 
@@ -316,7 +380,10 @@ class CustomPrivacy(
         }
     }
 
-    private fun createPrivacyDialog(activity: Activity, number: String): AlertDialogWpp {
+    private fun createPrivacyDialog(
+        activity: Activity,
+        userJid: FMessageWpp.UserJid
+    ): AlertDialogWpp {
         val builder = AlertDialogWpp(activity)
         builder.setTitle(R.string.custom_privacy)
 
@@ -338,29 +405,95 @@ class CustomPrivacy(
             "BlockCall"
         )
 
-        val checkedItems = loadPreferences(number, itemsKeys)
-
-        builder.setMultiChoiceItems(items, checkedItems) { _, which, isChecked ->
-            checkedItems[which] = isChecked
+        val json = getJSON(userJid)
+        val states = IntArray(itemsKeys.size) { i ->
+            when {
+                !json.has(itemsKeys[i]) -> STATE_DEFAULT
+                json.optBoolean(itemsKeys[i]) -> STATE_ENABLED
+                else -> STATE_DISABLED
+            }
         }
-        builder.setPositiveButton("OK") { _, _ ->
-            savePreferences(number, itemsKeys, checkedItems)
+
+        builder.setView(createOptionsView(activity, items, itemsKeys, states))
+        builder.setPositiveButton(activity.getString(R.string.save)) { _, _ ->
+            savePreferences(userJid, itemsKeys, states)
         }
         builder.setNegativeButton(activity.getString(R.string.cancel), null)
 
         return builder
     }
 
-    private fun loadPreferences(number: String, itemsKeys: Array<String>): BooleanArray {
-        val checkedItems = BooleanArray(itemsKeys.size)
-        val json = getJSON(number)
+    private fun createOptionsView(
+        activity: Activity,
+        items: Array<String>,
+        itemsKeys: Array<String>,
+        states: IntArray
+    ): View {
+        val textColor = DesignUtils.getPrimaryTextColor()
+        val accentColor = DesignUtils.getUnSeenColor()
+        val labels = arrayOf(
+            activity.getString(R.string.custom_privacy_default),
+            activity.getString(R.string.enabled),
+            activity.getString(R.string.disabled)
+        )
 
-        for (i in itemsKeys.indices) {
-            val globalKey = getGlobalKey(itemsKeys[i])
-            checkedItems[i] = json.optBoolean(itemsKeys[i], getDefaultPreference(globalKey))
+        val content = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(Utils.dipToPixels(20), Utils.dipToPixels(8), Utils.dipToPixels(20), 0)
         }
 
-        return checkedItems
+        for (i in itemsKeys.indices) {
+            val option = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, Utils.dipToPixels(10), 0, Utils.dipToPixels(10))
+            }
+
+            val texts = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            option.addView(texts)
+
+            texts.addView(TextView(activity).apply {
+                text = items[i]
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setTextColor(textColor)
+            })
+
+            val globalLabel = activity.getString(
+                if (getDefaultPreference(getGlobalKey(itemsKeys[i]))) R.string.enabled else R.string.disabled
+            )
+            texts.addView(TextView(activity).apply {
+                text = activity.getString(R.string.custom_privacy_global_status, globalLabel)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+                setTextColor(accentColor)
+            })
+
+            val spinner = Spinner(activity, Spinner.MODE_DROPDOWN).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { marginStart = Utils.dipToPixels(12) }
+                adapter = ArrayAdapter(
+                    activity,
+                    AndroidR.layout.simple_spinner_item,
+                    labels
+                ).apply { setDropDownViewResource(AndroidR.layout.simple_spinner_dropdown_item) }
+                setSelection(states[i])
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        states[i] = position
+                    }
+
+                    override fun onNothingSelected(parent: AdapterView<*>?) {}
+                }
+            }
+            option.addView(spinner)
+            content.addView(option)
+        }
+
+        return ScrollView(activity).apply { addView(content) }
     }
 
     private fun getGlobalKey(itemKey: String): String {
@@ -384,28 +517,26 @@ class CustomPrivacy(
     }
 
     private fun savePreferences(
-        number: String,
+        userJid: FMessageWpp.UserJid,
         itemsKeys: Array<String>,
-        checkedItems: BooleanArray
+        states: IntArray
     ) {
         try {
+            val id = storageId(userJid) ?: return
             val jsonObject = JSONObject()
 
             for (i in itemsKeys.indices) {
-                val globalKey = getGlobalKey(itemsKeys[i])
-
-                if (globalKey == "call_privacy") {
-                    if ((xprefs.getString(globalKey, "0") == "1") != checkedItems[i]) {
-                        jsonObject.put(itemsKeys[i], checkedItems[i])
-                    }
-                } else {
-                    if (xprefs.getBoolean(globalKey, false) != checkedItems[i]) {
-                        jsonObject.put(itemsKeys[i], checkedItems[i])
-                    }
+                when (states[i]) {
+                    STATE_ENABLED -> jsonObject.put(itemsKeys[i], true)
+                    STATE_DISABLED -> jsonObject.put(itemsKeys[i], false)
                 }
             }
 
-            WppCore.setPrivJSON("${number}_privacy", jsonObject)
+            val key = id + KEY_SUFFIX
+            WppCore.getPrivPrefs().edit(commit = true) {
+                if (jsonObject.length() == 0) remove(key) else putString(key, jsonObject.toString())
+                legacyKeys(userJid).filter { it != key }.forEach { remove(it) }
+            }
         } catch (e: Exception) {
             Utils.showToast(e.message, Toast.LENGTH_SHORT)
         }
