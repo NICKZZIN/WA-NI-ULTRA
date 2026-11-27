@@ -33,6 +33,7 @@ import org.luckypray.dexkit.result.ClassDataList
 import org.luckypray.dexkit.result.MethodData
 import org.luckypray.dexkit.result.MethodDataList
 import org.luckypray.dexkit.util.DexSignUtil
+import java.io.File
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
