@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recordings_manager">Gravações</string>
+    <string name="no_recordings_found">Nenhuma gravação encontrada</string>
+    <string name="delete_confirmation">Tem certeza de que deseja excluir esta gravação?</string>
+    <string name="delete_multiple_confirmation">Tem certeza de que deseja excluir %d gravações?</string>
+    <string name="share_recording">Compartilhar Gravação</string>
+    <string name="share_recordings">Compartilhar Gravações</string>
+    <string name="permission_required">Permissão Necessária</string>
+    <string name="permission_required_desc">É necessário acesso total aos arquivos para gerenciar as gravações salvas.</string>
+    <string name="grant">Permitir</string>
+    <string name="sort_by">Ordenar por</string>
+    <string name="sort_name">Nome</string>
+    <string name="sort_date">Data</string>
+    <string name="sort_duration">Duração</string>
+    <string name="sort_contact">Contato</string>
+
+    <string name="list_view">Lista</string>
+    <string name="group_by_contact">Por Contato</string>
+
+    <string name="selected_count">%d selecionada(s)</string>
+    <string name="recordings_select_all">Selecionar Tudo</string>
+
+    <string name="recordings_for">Gravações de %s</string>
+    <string name="recording_count">%d gravação(ões)</string>
+
+    <string name="play">Reproduzir</string>
+    <string name="pause">Pausar</string>
+    <string name="play_pause">Reproduzir/Pausar</string>
+    <string name="close">Fechar</string>
+    <string name="share">Compartilhar</string>
+    <string name="delete">Excluir</string>
+
+    <string name="call_recording_toast_title">Mostrar aviso ao gravar</string>
+    <string name="call_recording_toast_summary">Exibe um aviso na tela quando a gravação inicia ou para</string>
+
+    <string name="call_recording_settings">Configurações de Gravação</string>
+    <string name="select_recording_mode">Selecionar Modo de Gravação</string>
+    <string name="recording_mode_description">Escolha como o áudio das chamadas será capturado. O modo Root oferece melhor qualidade.</string>
+
+    <string name="root_mode">🔓 Modo Root (Recomendado)</string>
+    <string name="root_mode_description">Usa captura de áudio do sistema para obter a melhor qualidade.</string>
+    <string name="root_advantage_1">Grava os dois lados da conversa</string>
+    <string name="root_advantage_2">Qualidade de áudio cristalina</string>
+    <string name="root_advantage_3">Funciona em chamadas de voz do WhatsApp</string>
+    <string name="root_requirement">⚠️ Pode variar conforme restrições de cada fabricante Android</string>
+
+    <string name="non_root_mode">📱 Modo Sem Root</string>
+    <string name="non_root_mode_description">Usa a API padrão de áudio do Android. Funciona em todos os aparelhos, com limitações.</string>
+    <string name="non_root_advantage_1">Não precisa de root</string>
+    <string name="non_root_advantage_2">Compatível com qualquer Android</string>
+    <string name="non_root_limitation_1">Pode capturar apenas o seu microfone em alguns aparelhos</string>
+
+    <string name="advantages">✓ Vantagens</string>
+    <string name="limitations">⚠ Limitações</string>
+    <string name="recording_mode_info">As alterações valem na próxima chamada. Reinicie o WhatsApp após mudar as opções.</string>
+    <string name="root_access_granted">Acesso root concedido! Captura VOICE_CALL ativada.</string>
+    <string name="root_access_denied">Acesso root negado. Usando modo sem root.</string>
+    <string name="non_root_mode_enabled">Modo sem root ativado.</string>
+</resources>

@@ -35,6 +35,19 @@
             app:title="@string/update_check" />
 
         <rikka.material.preference.MaterialSwitchPreference
+            app:defaultValue="true"
+            app:key="enable_whatsapp_config_share"
+            app:summary="@string/enable_whatsapp_config_share_sum"
+            app:title="@string/enable_whatsapp_config_share" />
+
+        <rikka.material.preference.MaterialSwitchPreference
+            app:defaultValue="false"
+            app:dependency="enable_whatsapp_config_share"
+            app:key="auto_import_whatsapp_config"
+            app:summary="@string/auto_import_whatsapp_config_sum"
+            app:title="@string/auto_import_whatsapp_config" />
+
+        <rikka.material.preference.MaterialSwitchPreference
             app:defaultValue="false"
             app:key="disable_expiration"
             app:summary="@string/disable_whatsapp_expiration_sum"

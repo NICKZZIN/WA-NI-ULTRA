@@ -1,20 +1,10 @@
-[WA-NI-ULTRA 1.6.8]
+[WA-NI-ULTRA 1.6.9]
 
 [NEW]
-* Added support for WhatsApp and WhatsApp Business up to 2.26.46.xx
-* Enhanced Message Device Source: shows whether a message was sent via Phone or Linked Device (Desktop/Web/Companion) with tap-to-explain Toast
-* Bypass Screenshot Restriction: removes FLAG_SECURE to allow screenshots and screen recording on View Once media, profile photos, and locked chats
-* Parallel Media Downloading: accelerates downloads of large media (6 MB+) with configurable concurrent HTTP Range connections (2/4/6/8) and automatic fallback
-* Hide Locked Chat Notifications: silences Android notifications from locked chats independently
-* Visual Edit History Diff: highlights removed text (red strikethrough) and added text (green bold) in edited message history
-* Custom AB Props: override internal WhatsApp feature flags directly in General settings
-* Voice note speed slider, high quality voice notes (48 kHz) with configurable noise suppression, unsupported AAC audio transcoding, video note download, and status expiration time
-* Deleted Message Capture & Backup Viewer
-* Native message scheduling & View Once text sending
-* Redesigned per-contact Custom Privacy (LID-based) and Hide Delivered Receipt for unknown numbers
-* Enhanced Locked Chats (hides locked contacts from calls, contact picker, status updates & playback)
-* Complete Meta AI disable flags, CustomThemeV2 upgrades, and RootDiagnostics improvements
-
-[PERFORMANCE & ENGINE]
-* Upgraded to YukiHookAPI 1.5 (libxposed API 101), DexKit 2.3.0 on-demand bridge, binary unobfuscator cache, reflection caching, and shared ViewHookDispatcher
-* 100% free — all features unlocked with zero paywalls or license checks
+* Integrated Sticker & Sound Bot (zero pairing, 0% idle battery): create static image, animated video, and synchronized 48 kHz Opus audio stickers via !s, !fig, !som, !ajuda, 1-tap message popup, or Direct Studio + Live Mini Console + Anti-Ban wa.me shortcut
+* Dynamic Search Bar: automatically indexes every preference in XML screens without manual ID registration (with accent-insensitive matching)
+* Collapsible Dropdown Categories: Privacy, Media, and Customization tabs now group options in expandable inline dropdown lists (can be toggled in Customization)
+* App Settings & Backup Hub: new top-bar settings page with Export to Device or Share via WhatsApp, 1-tap WhatsApp file import (with optional auto-import), Persistent Device Default (survives app reinstall), and Reset confirmation dialog
+* Fixed GitHub Update Checker: supports both GitHub Releases and automatic master commit SHA fallback
+* Complete 100% Brazilian Portuguese translations across all screens and removed external API-key features
+* Supported WhatsApp & WhatsApp Business versions: 2.26.40.xx through 2.26.46.xx

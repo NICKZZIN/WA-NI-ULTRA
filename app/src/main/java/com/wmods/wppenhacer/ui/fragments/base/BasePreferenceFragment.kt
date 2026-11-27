@@ -28,6 +28,9 @@ import com.wmods.wppenhacer.App
 import com.wmods.wppenhacer.BuildConfig
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.preference.FloatSeekBarPreference
+import com.wmods.wppenhacer.ui.fragments.CustomizationFragment
+import com.wmods.wppenhacer.ui.fragments.MediaFragment
+import com.wmods.wppenhacer.ui.fragments.PrivacyFragment
 import com.wmods.wppenhacer.xposed.utils.Utils
 import rikka.material.preference.MaterialSwitchPreference
 import java.util.Locale
@@ -40,6 +43,13 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
     protected var mPrefs: SharedPreferences? = null
     private val prefs: SharedPreferences
         get() = checkNotNull(mPrefs)
+    private val expandedCategories = LinkedHashSet<Int>()
+
+    private val supportsCollapsibleCategories: Boolean
+        get() = this is PrivacyFragment || this is MediaFragment || this is CustomizationFragment
+
+    private fun isCollapsibleModeActive(): Boolean =
+        supportsCollapsibleCategories && prefs.getBoolean("collapsible_categories", true)
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         mPrefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
@@ -64,9 +74,70 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
         savedInstanceState: Bundle?
     ): View {
         applyReferencePreferenceStyle(preferenceScreen, R.drawable.ic_general)
+        applyCollapsibleCategoriesState()
         updatePreferenceStates(null)
         monitorPreference()
         return super.onCreateView(inflater, container, savedInstanceState)!!
+    }
+
+    private fun applyCollapsibleCategoriesState() {
+        val screen = preferenceScreen ?: return
+        val collapsible = isCollapsibleModeActive()
+        for (index in 0 until screen.preferenceCount) {
+            val category = screen.getPreference(index) as? PreferenceCategory ?: continue
+            if (!collapsible) {
+                category.isSelectable = false
+                category.summary = null
+                category.onPreferenceClickListener = null
+                setCategoryChildrenVisible(category, true)
+            } else {
+                val expanded = expandedCategories.contains(index)
+                category.isSelectable = true
+                updateCategoryHeaderSummary(category, expanded)
+                setCategoryChildrenVisible(category, expanded)
+                category.onPreferenceClickListener = Preference.OnPreferenceClickListener {
+                    val nowExpanded = if (expandedCategories.contains(index)) {
+                        expandedCategories.remove(index)
+                        false
+                    } else {
+                        expandedCategories.add(index)
+                        true
+                    }
+                    updateCategoryHeaderSummary(category, nowExpanded)
+                    setCategoryChildrenVisible(category, nowExpanded)
+                    true
+                }
+            }
+        }
+    }
+
+    private fun updateCategoryHeaderSummary(category: PreferenceCategory, expanded: Boolean) {
+        category.summary = if (expanded) {
+            "▼"
+        } else {
+            "▶  (${category.preferenceCount})"
+        }
+    }
+
+    private fun setCategoryChildrenVisible(category: PreferenceCategory, visible: Boolean) {
+        for (i in 0 until category.preferenceCount) {
+            category.getPreference(i).isVisible = visible
+        }
+    }
+
+    private fun expandCategoryContaining(preferenceKey: String) {
+        if (!isCollapsibleModeActive()) return
+        val screen = preferenceScreen ?: return
+        for (index in 0 until screen.preferenceCount) {
+            val category = screen.getPreference(index) as? PreferenceCategory ?: continue
+            if (category.findPreference<Preference>(preferenceKey) != null) {
+                if (expandedCategories.add(index)) {
+                    updateCategoryHeaderSummary(category, true)
+                    setCategoryChildrenVisible(category, true)
+                }
+                break
+            }
+        }
     }
 
     private fun applyReferencePreferenceStyle(group: PreferenceGroup?, inheritedIcon: Int) {
@@ -166,7 +237,12 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences, key: String?) {
         App.instance.sendBroadcast(Intent("${BuildConfig.APPLICATION_ID}.MANUAL_RESTART"))
-        if (isAdded) updatePreferenceStates(key)
+        if (isAdded) {
+            if (key == "collapsible_categories") {
+                applyCollapsibleCategoriesState()
+            }
+            updatePreferenceStates(key)
+        }
     }
 
     override fun onDestroy() {
@@ -309,11 +385,12 @@ abstract class BasePreferenceFragment : PreferenceFragmentCompat(),
 
     /** Scroll to a preference by its key and briefly highlight it. */
     override fun scrollToPreference(preferenceKey: String) {
+        expandCategoryContaining(preferenceKey)
         view?.postDelayed({
             val preference = findPreference<Preference>(preferenceKey) ?: return@postDelayed
             super.scrollToPreference(preference)
             highlightPreference(preference)
-        }, 100)
+        }, 120)
     }
 
     private fun highlightPreference(preference: Preference?) {

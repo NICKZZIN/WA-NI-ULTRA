@@ -22,6 +22,7 @@ import com.wmods.wppenhacer.databinding.ActivityMainBinding
 import com.wmods.wppenhacer.ui.fragments.GeneralFragment
 import com.wmods.wppenhacer.ui.fragments.HomeFragment
 import com.wmods.wppenhacer.ui.fragments.base.BasePreferenceFragment
+import com.wmods.wppenhacer.utils.ConfigBackupManager
 import com.wmods.wppenhacer.utils.FilePicker
 import java.io.File
 import kotlin.math.abs
@@ -121,6 +122,16 @@ class MainActivity : BaseActivity() {
 
     private fun handleIncomingIntent(intent: Intent?) {
         intent ?: return
+
+        if (intent.action == Intent.ACTION_VIEW && intent.data != null) {
+            val incomingUri = intent.data!!
+            intent.data = null
+            intent.action = null
+            ConfigBackupManager.handleIncomingFileIntent(this, incomingUri) {
+                recreate()
+            }
+            return
+        }
 
         val fragmentPosition = intent.getIntExtra("navigate_to_fragment", -1)
         val preferenceKey = intent.getStringExtra("scroll_to_preference")

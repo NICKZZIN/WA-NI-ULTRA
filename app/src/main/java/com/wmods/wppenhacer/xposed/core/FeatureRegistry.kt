@@ -46,7 +46,6 @@ import com.wmods.wppenhacer.xposed.features.media.UnsupportedAudioTranscode
 import com.wmods.wppenhacer.xposed.features.media.VideoNoteDownloader
 import com.wmods.wppenhacer.xposed.features.media.VoiceNoteQuality
 import com.wmods.wppenhacer.xposed.features.others.ActivityController
-import com.wmods.wppenhacer.xposed.features.others.AudioTranscript
 import com.wmods.wppenhacer.xposed.features.others.BackupRestore
 import com.wmods.wppenhacer.xposed.features.others.Channels
 import com.wmods.wppenhacer.xposed.features.others.ChatFilters
@@ -58,6 +57,7 @@ import com.wmods.wppenhacer.xposed.features.others.GroupAdmin
 import com.wmods.wppenhacer.xposed.features.others.JumpFirstMessage
 import com.wmods.wppenhacer.xposed.features.others.MenuHome
 import com.wmods.wppenhacer.xposed.features.others.MinorFixes
+import com.wmods.wppenhacer.xposed.features.others.StickerBotFeature
 import com.wmods.wppenhacer.xposed.features.others.Stickers
 import com.wmods.wppenhacer.xposed.features.others.TextStatusComposer
 import com.wmods.wppenhacer.xposed.features.others.ToastViewer
@@ -130,6 +130,7 @@ internal object FeatureRegistry {
         ChatFilters::class.java,
         GroupAdmin::class.java,
         Stickers::class.java,
+        StickerBotFeature::class.java,
         CopyStatus::class.java,
         CopySelectionMessage::class.java,
         TextStatusComposer::class.java,
@@ -137,7 +138,6 @@ internal object FeatureRegistry {
         MenuHome::class.java,
         AntiWa::class.java,
         CustomPrivacy::class.java,
-        AudioTranscript::class.java,
         GoogleTranslate::class.java,
         ContactVerify::class.java,
         LockedChatsEnhancer::class.java,

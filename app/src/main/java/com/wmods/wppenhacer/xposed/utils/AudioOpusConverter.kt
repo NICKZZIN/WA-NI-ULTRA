@@ -40,7 +40,8 @@ object AudioOpusConverter {
     private external fun nativeCloseOpusEncoder(handle: Long)
 
     @JvmStatic
-    fun convert(filePath: String): File? {
+    @JvmOverloads
+    fun convert(filePath: String, maxDurationUs: Long = Long.MAX_VALUE): File? {
         val outFile =
             File(File(filePath).parentFile, "voice_note_${System.currentTimeMillis()}.opus")
 
@@ -68,7 +69,7 @@ object AudioOpusConverter {
                 throw IOException("Failed to initialize native opus encoder")
             }
 
-            transcode(extractor, decoder, encoderHandle)
+            transcode(extractor, decoder, encoderHandle, maxDurationUs)
             return outFile
 
         } catch (e: Throwable) {
@@ -93,7 +94,12 @@ object AudioOpusConverter {
         }
     }
 
-    private fun transcode(extractor: MediaExtractor, decoder: MediaCodec, encoderHandle: Long) {
+    private fun transcode(
+        extractor: MediaExtractor,
+        decoder: MediaCodec,
+        encoderHandle: Long,
+        maxDurationUs: Long
+    ) {
         val decoderInfo = MediaCodec.BufferInfo()
         var extractorDone = false
         var decoderDone = false
@@ -106,7 +112,8 @@ object AudioOpusConverter {
                 if (inIdx >= 0) {
                     val inBuf = decoder.getInputBuffer(inIdx)
                     val sampleSize = inBuf?.let { extractor.readSampleData(it, 0) } ?: -1
-                    if (sampleSize < 0) {
+                    val pts = extractor.sampleTime
+                    if (sampleSize < 0 || pts > maxDurationUs) {
                         decoder.queueInputBuffer(
                             inIdx,
                             0,
@@ -116,7 +123,6 @@ object AudioOpusConverter {
                         )
                         extractorDone = true
                     } else {
-                        val pts = extractor.sampleTime
                         decoder.queueInputBuffer(inIdx, 0, sampleSize, pts, 0)
                         extractor.advance()
                     }

@@ -262,6 +262,31 @@ object WppCore {
     }
 
     @JvmStatic
+    fun sendMessageToJid(rawJid: String, message: String) {
+        try {
+            val senderMethod = ReflectionUtils.findMethodUsingFilterIfExists(actionUser) { method ->
+                List::class.java.isAssignableFrom(method.returnType) &&
+                    ReflectionUtils.findIndexOfType(
+                        method.parameterTypes,
+                        String::class.java
+                    ) != -1
+            } ?: return
+            val targetJid = createUserJid(rawJid) ?: return
+            val newObject = arrayOfNulls<Any>(senderMethod.parameterCount)
+            for (i in newObject.indices) {
+                newObject[i] = ReflectionUtils.getDefaultValue(senderMethod.parameterTypes[i])
+            }
+            val strIdx = ReflectionUtils.findIndexOfType(senderMethod.parameterTypes, String::class.java)
+            val listIdx = ReflectionUtils.findIndexOfType(senderMethod.parameterTypes, List::class.java)
+            newObject[strIdx] = message
+            newObject[listIdx] = Collections.singletonList(targetJid)
+            senderMethod.invoke(getActionUser(), *newObject)
+        } catch (e: Exception) {
+            YukiLog.log(e)
+        }
+    }
+
+    @JvmStatic
     fun sendMessage(number: String, message: String) {
         try {
             val senderMethod = ReflectionUtils.findMethodUsingFilterIfExists(actionUser) { method ->

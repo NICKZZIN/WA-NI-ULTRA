@@ -1,61 +1,47 @@
 package com.wmods.wppenhacer.ui.fragments
 
-import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.SharedPreferences
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AnimationUtils
 import android.widget.Toast
 import androidx.core.content.ContextCompat
-import androidx.core.content.edit
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
-import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.highcapable.yukihookapi.YukiHook
 import com.wmods.wppenhacer.App
 import com.wmods.wppenhacer.BuildConfig
 import com.wmods.wppenhacer.R
+import com.wmods.wppenhacer.UpdateChecker
+import com.wmods.wppenhacer.activities.StickerBotActivity
 import com.wmods.wppenhacer.adapter.LogLineAdapter
 import com.wmods.wppenhacer.databinding.DialogDiagnosticsLogBinding
 import com.wmods.wppenhacer.databinding.FragmentHomeBinding
 import com.wmods.wppenhacer.ui.fragments.base.BaseFragment
-import com.wmods.wppenhacer.utils.FilePicker
 import com.wmods.wppenhacer.utils.RootDiagnostics
 import com.wmods.wppenhacer.xposed.core.FeatureLoader
 import com.wmods.wppenhacer.xposed.utils.Utils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
-import rikka.core.util.IOUtils
 import java.net.UnknownHostException
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class HomeFragment : BaseFragment() {
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
+    private var latestUpdateUrl: String = UpdateChecker.TELEGRAM_UPDATE_URL
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,7 +69,6 @@ class HomeFragment : BaseFragment() {
         _binding = FragmentHomeBinding.inflate(inflater, container, false)
 
         checkStateWpp(requireActivity())
-        // libxposed binds the framework service asynchronously, refresh once it connects.
         YukiHook.Status.observeFrameworkService(viewLifecycleOwner.lifecycle) {
             if (_binding != null) updateModuleStatus()
         }
@@ -109,24 +94,14 @@ class HomeFragment : BaseFragment() {
             disableBusiness()
         }
 
-        binding.exportBtn.setOnClickListener { view ->
+        binding.openStickerBotBtn.setOnClickListener { view ->
             animateClick(view)
-            saveConfigs(requireContext())
-        }
-
-        binding.importBtn.setOnClickListener { view ->
-            animateClick(view)
-            importConfigs(requireContext())
-        }
-
-        binding.resetBtn.setOnClickListener { view ->
-            animateClick(view)
-            resetConfigs(requireContext())
+            startActivity(Intent(requireContext(), StickerBotActivity::class.java))
         }
 
         binding.updateCard.setOnClickListener { view ->
             animateClick(view)
-            Utils.openLink(requireActivity(), "https://t.me/NickC137")
+            Utils.openLink(requireActivity(), latestUpdateUrl)
         }
 
         binding.diagBtn.setOnClickListener { view ->
@@ -218,156 +193,6 @@ class HomeFragment : BaseFragment() {
         binding.statusIcon2.setImageResource(R.drawable.ic_round_check_circle_24)
     }
 
-    private fun resetConfigs(context: Context) {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        prefs.edit {
-            prefs.all.keys.forEach { key -> remove(key) }
-        }
-        App.instance.restartApp(FeatureLoader.PACKAGE_WPP)
-        App.instance.restartApp(FeatureLoader.PACKAGE_BUSINESS)
-        Utils.showToast(context.getString(R.string.configs_reset), Toast.LENGTH_SHORT)
-    }
-
-    @Throws(JSONException::class)
-    private fun getJsonObject(prefs: SharedPreferences): JSONObject {
-        val entries = prefs.all
-        val jsonObject = JSONObject()
-        for ((key, value) in entries) {
-            val type = JSONObject()
-            var keyValue: Any? = value
-            if (keyValue is Set<*>) {
-                keyValue = JSONArray(ArrayList(keyValue))
-            }
-            if (keyValue != null) {
-                type.put("type", keyValue.javaClass.simpleName)
-                type.put("value", keyValue)
-                jsonObject.put(key, type)
-            }
-        }
-        return jsonObject
-    }
-
-    private fun saveConfigs(context: Context) {
-        FilePicker.setOnUriPickedListener { uri ->
-            lifecycleScope.launch(Dispatchers.IO) {
-                try {
-                    context.contentResolver.openOutputStream(uri)?.use { output ->
-                        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-                        val jsonObject = getJsonObject(prefs)
-                        output.write(jsonObject.toString(4).toByteArray())
-                    }
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.configs_saved),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        }
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
-        val formattedDate = dateFormat.format(Date())
-        try {
-            FilePicker.fileSalve.launch("wpp_enhacer_configs_$formattedDate.json")
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(context, R.string.no_file_picker, Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun parseConfigEntries(json: JSONObject): Map<String, Any> {
-        val result = LinkedHashMap<String, Any>()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-            val key = keys.next()
-            var raw: Any? = json.opt(key)
-            var type: String? = null
-            if (raw is JSONObject) {
-                type = raw.optString("type").ifEmpty { null }
-                raw = raw.opt("value")
-            }
-            if (raw == null || raw == JSONObject.NULL) continue
-            val parsed = runCatching { convertConfigValue(type, raw) }.getOrNull() ?: continue
-            result[key] = parsed
-        }
-        return result
-    }
-
-    private fun convertConfigValue(type: String?, raw: Any): Any? {
-        if (raw is JSONArray) {
-            val set = LinkedHashSet<String>()
-            for (i in 0 until raw.length()) set.add(raw.getString(i))
-            return set
-        }
-        val text = raw.toString()
-        return when (type?.lowercase()) {
-            "boolean" -> raw as? Boolean ?: text.toBooleanStrictOrNull()
-            "integer", "int" -> (raw as? Number)?.toInt() ?: text.toIntOrNull()
-            "long" -> (raw as? Number)?.toLong() ?: text.toLongOrNull()
-            "float", "double" -> (raw as? Number)?.toFloat() ?: text.toFloatOrNull()
-            "string" -> text
-            else -> when (raw) {
-                is Boolean -> raw
-                is Int -> raw
-                is Long -> raw
-                is Number -> raw.toFloat()
-                else -> text
-            }
-        }
-    }
-
-    private fun importConfigs(context: Context) {
-        FilePicker.setOnUriPickedListener { uri ->
-            lifecycleScope.launch(Dispatchers.IO) {
-                try {
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        val data = IOUtils.toString(input)
-                        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-                        val jsonObject = JSONObject(data)
-
-                        val entries = parseConfigEntries(jsonObject)
-                        prefs.edit(commit = true) {
-                            prefs.all.keys.forEach { key -> remove(key) }
-                            entries.forEach { (key, value) ->
-                                when (value) {
-                                    is Boolean -> putBoolean(key, value)
-                                    is Int -> putInt(key, value)
-                                    is Long -> putLong(key, value)
-                                    is Float -> putFloat(key, value)
-                                    is String -> putString(key, value)
-                                    is Set<*> -> putStringSet(key, value.filterIsInstance<String>().toSet())
-                                }
-                            }
-                        }
-                    }
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(
-                            context,
-                            context.getString(R.string.configs_imported),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        App.instance.restartApp(FeatureLoader.PACKAGE_WPP)
-                        App.instance.restartApp(FeatureLoader.PACKAGE_BUSINESS)
-                    }
-                } catch (e: Exception) {
-                    Log.e("importConfigs", e.message ?: "", e)
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        }
-        try {
-            FilePicker.fileCapture.launch(arrayOf("application/json"))
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(context, R.string.no_file_picker, Toast.LENGTH_LONG).show()
-        }
-    }
-
     private fun updateModuleStatus() {
         if (YukiHook.Status.isModuleActive) {
             binding.statusIcon.setImageResource(R.drawable.ic_round_check_circle_24)
@@ -395,9 +220,6 @@ class HomeFragment : BaseFragment() {
             binding.status3.visibility = View.GONE
         }
         checkWpp(activity)
-        binding.deviceName.text = Build.MANUFACTURER
-        binding.sdk.text = Build.VERSION.SDK_INT.toString()
-        binding.modelName.text = Build.DEVICE
         if (App.isOriginalPackage) {
             binding.listWpp.text =
                 activity.resources.getStringArray(R.array.supported_versions_wpp).contentToString()
@@ -475,12 +297,7 @@ class HomeFragment : BaseFragment() {
 
     private fun isSupportedVersion(version: String?, supportedVersions: List<String>): Boolean {
         return version != null && supportedVersions.any {
-            version.startsWith(
-                it.replace(
-                    ".xx",
-                    ""
-                )
-            )
+            version.startsWith(it.replace(".xx", ""))
         }
     }
 
@@ -511,40 +328,19 @@ class HomeFragment : BaseFragment() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val client = OkHttpClient.Builder()
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(10, TimeUnit.SECONDS)
-                    .build()
-
-                val request = Request.Builder()
-                    .url("https://api.github.com/repos/NICKZZIN/WA-NI-ULTRA/releases/latest")
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        updateCardState(success = false, isUpToDate = false, newVersion = null)
-                        return@use
+                val result = UpdateChecker.checkLatest(BuildConfig.VERSION_NAME)
+                if (result == null) {
+                    updateCardState(success = false, isUpToDate = false, newVersion = null)
+                } else {
+                    latestUpdateUrl = if (result.isNewVersion) {
+                        result.downloadUrl
+                    } else {
+                        UpdateChecker.TELEGRAM_UPDATE_URL
                     }
-
-                    val body = response.body
-                    val content = body.string()
-                    val release = JSONObject(content)
-                    val tagName = release.optString("tag_name", "")
-
-                    if (tagName.isBlank()) {
-                        updateCardState(success = true, isUpToDate = true, newVersion = null)
-                        return@use
-                    }
-
-                    val parts = tagName.split("-")
-                    val hash = if (parts.size > 1) parts[1].trim() else ""
-                    val isNewVersion = hash.isNotEmpty() && !BuildConfig.VERSION_NAME.lowercase()
-                        .contains(hash.lowercase().trim())
-
                     updateCardState(
                         success = true,
-                        isUpToDate = !isNewVersion,
-                        newVersion = tagName
+                        isUpToDate = !result.isNewVersion,
+                        newVersion = result.versionLabel
                     )
                 }
             } catch (_: UnknownHostException) {

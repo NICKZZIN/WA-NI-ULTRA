@@ -17,6 +17,7 @@ import androidx.preference.PreferenceManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.highcapable.yukihookapi.hook.xposed.application.ModuleApplication
 import com.wmods.wppenhacer.activities.CrashReportActivity
+import com.wmods.wppenhacer.utils.ConfigBackupManager
 import com.wmods.wppenhacer.xposed.utils.Utils
 import rikka.material.app.LocaleDelegate.Companion.defaultLocale
 import java.io.File
@@ -38,6 +39,7 @@ class App : ModuleApplication() {
 
         try {
             sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
+            ConfigBackupManager.restorePersistentDefaultIfNeeded(this, sharedPreferences)
             sharedPreferences.registerOnSharedPreferenceChangeListener(prefsChangeListener)
             RemotePreferencesSync(this).start()
             val mode = sharedPreferences.getString("thememode", "0")!!.toInt()

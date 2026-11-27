@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="supported_versions_wpp">
-        <item>2.26.38.xx</item>
-        <item>2.26.39.xx</item>
         <item>2.26.40.xx</item>
         <item>2.26.41.xx</item>
         <item>2.26.42.xx</item>
@@ -12,8 +10,6 @@
         <item>2.26.46.xx</item>
     </string-array>
     <string-array name="supported_versions_business">
-        <item>2.26.38.xx</item>
-        <item>2.26.39.xx</item>
         <item>2.26.40.xx</item>
         <item>2.26.41.xx</item>
         <item>2.26.42.xx</item>

@@ -84,7 +84,14 @@ class SearchActivity : BaseActivity(), SearchAdapter.OnFeatureClickListener {
     }
 
     override fun onFeatureClick(feature: SearchableFeature) {
-        if (feature.fragmentType == SearchableFeature.FragmentType.ACTIVITY) return
+        if (feature.fragmentType == SearchableFeature.FragmentType.ACTIVITY) {
+            when (feature.key) {
+                "sticker_bot_open" -> startActivity(Intent(this, StickerBotActivity::class.java))
+                "app_settings_open" -> startActivity(Intent(this, AboutActivity::class.java))
+            }
+            finish()
+            return
+        }
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("navigate_to_fragment", feature.fragmentType.position)

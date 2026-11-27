@@ -7,6 +7,12 @@
         app:title="@string/general">
 
         <rikka.material.preference.MaterialSwitchPreference
+            app:defaultValue="true"
+            app:key="collapsible_categories"
+            app:summary="@string/collapsible_categories_sum"
+            app:title="@string/collapsible_categories" />
+
+        <rikka.material.preference.MaterialSwitchPreference
             app:key="changecolor"
             app:summary="@string/colors_customization_sum"
             app:title="@string/colors_customization" />

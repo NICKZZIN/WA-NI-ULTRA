@@ -325,7 +325,7 @@
                 </com.google.android.material.card.MaterialCardView>
 
                 <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/info_card"
+                    android:id="@+id/sticker_bot_card"
                     style="@style/CardInfoStyle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -339,90 +339,46 @@
                         android:padding="@dimen/spacing_medium">
 
                         <com.google.android.material.textview.MaterialTextView
-                            android:layout_width="wrap_content"
+                            style="@style/DeviceInfoDialogLabel"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="SYSTEM INFO"
-                            android:textAppearance="?textAppearanceLabelSmall"
-                            android:textColor="@color/whatsapp_dark_green"
-                            android:letterSpacing="0.12"
-                            android:textStyle="bold" />
+                            android:text="@string/sticker_bot_title"
+                            android:textAlignment="center" />
 
-                        <LinearLayout
+                        <com.google.android.material.textview.MaterialTextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="@dimen/spacing_xs"
+                            android:text="@string/sticker_bot_summary"
+                            android:textAlignment="center"
+                            android:textAppearance="?textAppearanceBodyMedium"
+                            android:textColor="?colorOnSurfaceVariant" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/openStickerBotBtn"
+                            style="@style/ModernButton"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/spacing_small"
-                            android:orientation="horizontal">
+                            android:text="@string/sticker_bot_open_btn" />
 
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:orientation="vertical">
+                    </LinearLayout>
 
-                                <com.google.android.material.textview.MaterialTextView
-                                    style="@style/DeviceInfoDialogLabel"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/device_name" />
+                </com.google.android.material.card.MaterialCardView>
 
-                                <com.google.android.material.textview.MaterialTextView
-                                    android:id="@+id/device_name"
-                                    style="@style/DeviceInfoDialogValue"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:fontFamily="monospace"
-                                    android:textStyle="bold" />
-                            </LinearLayout>
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/info_card"
+                    style="@style/CardInfoStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="@dimen/spacing_medium"
+                    app:cardBackgroundColor="@color/surface_container">
 
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:orientation="vertical">
-
-                                <com.google.android.material.textview.MaterialTextView
-                                    style="@style/DeviceInfoDialogLabel"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="@string/device_model" />
-
-                                <com.google.android.material.textview.MaterialTextView
-                                    android:id="@+id/model_name"
-                                    style="@style/DeviceInfoDialogValue"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:fontFamily="monospace"
-                                    android:textStyle="bold" />
-                            </LinearLayout>
-                        </LinearLayout>
-
-                        <View
-                            android:layout_width="match_parent"
-                            android:layout_height="1dp"
-                            android:layout_marginVertical="@dimen/spacing_small"
-                            android:alpha="0.4"
-                            android:background="?android:attr/listDivider" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            style="@style/DeviceInfoDialogLabel"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/android_version" />
-
-                        <com.google.android.material.textview.MaterialTextView
-                            android:id="@+id/sdk"
-                            style="@style/DeviceInfoDialogValue"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:fontFamily="monospace"
-                            android:textStyle="bold" />
-
-                        <View
-                            android:layout_width="match_parent"
-                            android:layout_height="1dp"
-                            android:layout_marginVertical="@dimen/spacing_small"
-                            android:alpha="0.4"
-                            android:background="?android:attr/listDivider" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="@dimen/spacing_medium">
 
                         <com.google.android.material.textview.MaterialTextView
                             android:layout_width="wrap_content"
@@ -546,70 +502,10 @@
                 </com.google.android.material.card.MaterialCardView>
 
                 <com.google.android.material.card.MaterialCardView
-                    style="@style/CardInfoStyle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:cardBackgroundColor="@color/surface_container">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center"
-                        android:orientation="vertical"
-                        android:padding="@dimen/spacing_medium">
-
-                        <com.google.android.material.textview.MaterialTextView
-                            style="@style/DeviceInfoDialogLabel"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="@string/backup_settings"
-                            android:textAlignment="center" />
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="@dimen/spacing_small"
-                            android:orientation="horizontal">
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/importBtn"
-                                style="@style/ModernButton.Outlined"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_marginEnd="@dimen/spacing_small"
-                                android:layout_weight="1"
-                                android:text="@string/import_settings" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/exportBtn"
-                                style="@style/ModernButton"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="@dimen/spacing_small"
-                                android:layout_weight="1"
-                                android:text="@string/export_settings" />
-
-                        </LinearLayout>
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/resetBtn"
-                            style="@style/ModernButton.Outlined"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="@dimen/spacing_small"
-                            android:text="@string/reset_settings"
-                            app:strokeColor="?colorError" />
-
-                    </LinearLayout>
-
-                </com.google.android.material.card.MaterialCardView>
-
-                <com.google.android.material.card.MaterialCardView
                     android:id="@+id/diag_card"
                     style="@style/CardInfoStyle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/spacing_medium"
                     app:cardBackgroundColor="@color/surface_container">
 
                     <LinearLayout

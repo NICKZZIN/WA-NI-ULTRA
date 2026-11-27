@@ -67,7 +67,6 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
         val filterItems = xprefs.getString("filter_items", null)
         val autonextStatus = xprefs.getBoolean("autonext_status", false)
         val audioType = xprefs.getString("audio_type", "0")?.toInt() ?: 0
-        val audioTranscription = xprefs.getBoolean("audio_transcription", false)
         val oldStatus = xprefs.getBoolean("oldstatus", false)
         val igstatus = xprefs.getBoolean("igstatus", false)
         val nativeIgStatus = xprefs.getBoolean("native_igstatus", false)
@@ -210,17 +209,6 @@ class Others(loader: ClassLoader, preferences: SharedPreferences) : Feature(load
             booleans[12595] = false
             booleans[12597] = false
             integers[15535] = 0
-        }
-
-        if (audioTranscription) {
-            booleans[8632] = true
-            booleans[2890] = true
-            booleans[9215] = false
-            booleans[9216] = true
-            booleans[6808] = true
-            booleans[10286] = true
-            booleans[11596] = true
-            booleans[13949] = true
         }
 
         // Whatsapp Status Style
