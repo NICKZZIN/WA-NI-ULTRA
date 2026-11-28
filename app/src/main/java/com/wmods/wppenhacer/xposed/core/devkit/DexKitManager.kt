@@ -1,10 +1,14 @@
 package com.wmods.wppenhacer.xposed.core.devkit
 
+import android.os.Build
+import com.wmods.wppenhacer.xposed.core.FeatureLoader
 import org.luckypray.dexkit.DexKitBridge
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
+import java.util.zip.ZipFile
 import kotlin.concurrent.withLock
 
 class DexKitManager(private val apkPath: String) {
@@ -79,11 +83,72 @@ class DexKitManager(private val apkPath: String) {
 
     private fun createBridge(): DexKitBridge {
         return try {
-            System.loadLibrary("dexkit")
+            loadDexKitNative()
             DexKitBridge.create(apkPath)
         } catch (e: Throwable) {
             throw RuntimeException("Failed to initialize DexKit bridge", e)
         }
+    }
+
+    private fun loadDexKitNative() {
+        try {
+            System.loadLibrary("dexkit")
+            return
+        } catch (_: Throwable) {
+        }
+
+        val moduleInfo = runCatching { FeatureLoader.moduleContext.applicationInfo }.getOrNull()
+        val nativeDir = moduleInfo?.nativeLibraryDir
+        if (!nativeDir.isNullOrEmpty()) {
+            val so = File(nativeDir, "libdexkit.so")
+            if (so.exists() && so.canRead()) {
+                runCatching {
+                    System.load(so.absolutePath)
+                    return
+                }
+            }
+        }
+
+        val sourceApk = moduleInfo?.sourceDir
+        if (!sourceApk.isNullOrEmpty()) {
+            for (abi in Build.SUPPORTED_ABIS) {
+                runCatching {
+                    System.load("$sourceApk!/lib/$abi/libdexkit.so")
+                    return
+                }
+            }
+            val hostApp = FeatureLoader.mApp
+            if (hostApp != null) {
+                runCatching {
+                    ZipFile(sourceApk).use { zip ->
+                        for (abi in Build.SUPPORTED_ABIS) {
+                            val entry = zip.getEntry("lib/$abi/libdexkit.so") ?: continue
+                            val outDir = File(hostApp.codeCacheDir, "wae_jni").apply { mkdirs() }
+                            val outSo = File(outDir, "libdexkit_${abi}_${entry.crc}.so")
+                            if (!outSo.exists() || outSo.length() != entry.size) {
+                                if (outSo.exists()) {
+                                    outSo.setWritable(true)
+                                    outSo.delete()
+                                }
+                                zip.getInputStream(entry).use { input ->
+                                    outSo.outputStream().use { output -> input.copyTo(output) }
+                                }
+                                outSo.setReadable(true, false)
+                                outSo.setExecutable(true, false)
+                                outSo.setReadOnly()
+                            }
+                            runCatching {
+                                System.load(outSo.absolutePath)
+                                return
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Rethrow standard error if all fallbacks failed
+        System.loadLibrary("dexkit")
     }
 
     private fun cancelIdleCloseLocked() {

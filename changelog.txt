@@ -1,4 +1,4 @@
-[WA-NI-ULTRA 1.7.3]
+[WA-NI-ULTRA 1.7.4]
 
 [NEW]
 * Native Sound Stickers Engine (/figsom): ported full WhatsApp Sound Sticker protobuf wrapper (134 -> 1 -> 26 -> 26 + HKDFv3 streamingSidecar) + local 🔊 badge & tap-to-play MediaPlayer inside WhatsApp chats, plus fixed JNI libaudio_opus_converter loading inside Xposed

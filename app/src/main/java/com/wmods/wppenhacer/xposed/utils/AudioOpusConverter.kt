@@ -105,10 +105,14 @@ object AudioOpusConverter {
                                 outSo.setExecutable(true, false)
                                 outSo.setReadOnly()
                             }
-                            System.load(outSo.absolutePath)
-                            nativeLoaded = true
-                            lastError = null
-                            return true
+                            try {
+                                System.load(outSo.absolutePath)
+                                nativeLoaded = true
+                                lastError = null
+                                return true
+                            } catch (e: Throwable) {
+                                lastError = "Stage4($abi): ${e.message}"
+                            }
                         }
                     }
                 } catch (t: Throwable) {
